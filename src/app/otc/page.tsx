@@ -296,16 +296,12 @@ function DetailModal({ id, userAddr, onClose, onBuy, onOffer, onAccept }: {
     setBusy(false);
   };
 
-  if (loading || !l) return (
+  if (loading || !l) {
+  return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" style={{ textAlign:'center', padding:60 }}>
-        <span className="spinner" style={{ width:36, height:36, borderWidth:3 }} />
-      </div>
-    </div>
-  );
+      <div className
 
   return (
-  <>
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" style={{ maxWidth:600 }} onClick={e=>e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
@@ -327,8 +323,6 @@ function DetailModal({ id, userAddr, onClose, onBuy, onOffer, onAccept }: {
             </div>
           </div>
         </div>
-         </>
-        );
 
         {/* stats */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:9, marginBottom:14 }}>
