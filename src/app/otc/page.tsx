@@ -297,9 +297,14 @@ function DetailModal({ id, userAddr, onClose, onBuy, onOffer, onAccept }: {
   };
 
   if (loading || !l) {
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className
+    return (
+      <div className="modal-bg" onClick={onClose}>
+        <div className="modal" style={{ textAlign:'center', padding:60 }}>
+          <span className="spinner" style={{ width:36, height:36, borderWidth:3 }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="modal-bg" onClick={onClose}>
