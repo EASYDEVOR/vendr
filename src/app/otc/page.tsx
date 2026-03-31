@@ -296,15 +296,13 @@ function DetailModal({ id, userAddr, onClose, onBuy, onOffer, onAccept }: {
     setBusy(false);
   };
 
-  if (loading || !l) {
-    return (
-      <div className="modal-bg" onClick={onClose}>
-        <div className="modal" style={{ textAlign:'center', padding:60 }}>
-          <span className="spinner" style={{ width:36, height:36, borderWidth:3 }} />
-        </div>
+  if (loading || !l) return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" style={{ textAlign:'center', padding:60 }}>
+        <span className="spinner" style={{ width:36, height:36, borderWidth:3 }} />
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
     <div className="modal-bg" onClick={onClose}>
@@ -377,7 +375,7 @@ function DetailModal({ id, userAddr, onClose, onBuy, onOffer, onAccept }: {
                   <div style={{ fontSize:10, color:'#44445A', fontFamily:'Space Mono,monospace' }}>{ago(o.createdAt)}</div>
                 </div>
                 {isSeller && (
-                  <div style={{ display:'flex', gap:4' }}>
+                  <div style={{ display:'flex', gap:4 }}>
                     <button onClick={()=>doAccept(o.id)} disabled={busy} style={{ padding:'4px 8px', background:'#00C805', border:'none', borderRadius:4, color:'#000', fontSize:10, fontWeight:700, cursor:'pointer' }}>Accept</button>
                     <button onClick={()=>doIgnore(o.id)} disabled={busy} style={{ padding:'4px 8px', background:'#1C1C35', border:'1px solid rgba(255,255,255,.1)', borderRadius:4, color:'#8888AA', fontSize:10, fontWeight:700, cursor:'pointer' }}>Ignore</button>
                   </div>
