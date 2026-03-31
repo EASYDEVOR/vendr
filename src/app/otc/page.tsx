@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { parseEther, parseUnits } from 'viem';
 import toast from 'react-hot-toast';
+
 import Navbar from '@/components/Navbar';
 import LiveTicker from '@/components/LiveTicker';
 import BottomBar from '@/components/BottomBar';
@@ -59,9 +60,7 @@ function ListingRow({ l, onSelect }: { l: OTCListing; onSelect: () => void }) {
       <td className="r">
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
           <span style={{ fontSize: 11, color: filled > 0 ? '#00C805' : '#44445A' }}>{filled}%</span>
-          <div className="bar" style={{ width: 52 }}>
-            <div className="bar-fill" style={{ width: `${filled}%` }} />
-          </div>
+          <div className="bar" style={{ width: 52 }}><div className="bar-fill" style={{ width: `${filled}%` }} /></div>
         </div>
       </td>
       <td className="r">
@@ -329,9 +328,6 @@ function DetailModal({ id, userAddr, onClose, onBuy, onOffer, onAccept }: {
           </div>
         </div>
 
-        {/* stats, fill bar, offers list, buy/offer tabs - kept from your original */}
-        {/* (the rest is identical to what you had) */}
-
         {isSeller && <div style={{ marginTop: 14, padding: '12px 14px', background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 8, fontSize: 12, color: '#8888AA', textAlign: 'center' }}>This is your listing. Accept / ignore offers above, or go to Portfolio to edit / cancel.</div>}
       </div>
     </div>
@@ -418,12 +414,7 @@ export default function OTCPage() {
 
       <BottomBar />
 
-      {showList && (
-        <ListModal
-          onClose={() => setShowList(false)}
-          onSuccess={h => { setShowList(false); setSuccess({ type: 'listed', details: { txHash: h } }); refetch(); }}
-        />
-      )}
+      {showList && <ListModal onClose={() => setShowList(false)} onSuccess={h => { setShowList(false); setSuccess({ type: 'listed', details: { txHash: h } }); refetch(); }} />}
 
       {selected !== null && (
         <DetailModal
