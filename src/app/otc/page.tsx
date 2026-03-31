@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { parseEther, parseUnits } from 'viem';
@@ -8,6 +9,7 @@ import Navbar from '@/components/Navbar';
 import LiveTicker from '@/components/LiveTicker';
 import BottomBar from '@/components/BottomBar';
 import SuccessModal from '@/components/SuccessModal';
+
 import { publicClient } from '@/lib/client';
 import { useOTCListings, useOTCListing, OTCListing, OTCOffer } from '@/hooks/useOTC';
 import { useTokenInfo } from '@/hooks/useWallet';
@@ -60,7 +62,9 @@ function ListingRow({ l, onSelect }: { l: OTCListing; onSelect: () => void }) {
       <td className="r">
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
           <span style={{ fontSize: 11, color: filled > 0 ? '#00C805' : '#44445A' }}>{filled}%</span>
-          <div className="bar" style={{ width: 52 }}><div className="bar-fill" style={{ width: `${filled}%` }} /></div>
+          <div className="bar" style={{ width: 52 }}>
+            <div className="bar-fill" style={{ width: `${filled}%` }} />
+          </div>
         </div>
       </td>
       <td className="r">
