@@ -62,7 +62,7 @@ function Row({ l, onSelect }: { l: OTCListing; onSelect: () => void }) {
       <td className="r muted mono" style={{ fontSize: 10 }}>{ago(l.createdAt)}</td>
       <td className="r" onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-          <button className="btn btn-lime" style={{ padding: '5px 9px', fontSize: 11, borderRadius: 6 }} onClick={() => useRouter().push(`/listing/${l.id.toString()}`)}>View</button>
+          <button className="btn btn-lime" style={{ padding: '5px 9px', fontSize: 11, borderRadius: 6 }} onClick={() => router.push(`/listing/${l.id.toString()}`)}>View</button>
         </div>
       </td>
     </tr>
