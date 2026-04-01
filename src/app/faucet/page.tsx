@@ -254,6 +254,24 @@ export default function FaucetPage() {
             </div>
           ))}
         </div>
+
+        {/* Robinhood ETH Faucet */}
+        <div style={{ width: '100%', maxWidth: 520, marginTop: 16 }}>
+          <div style={{ padding: '14px 18px', background: 'rgba(98,126,234,.06)', border: '1px solid rgba(98,126,234,.18)', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ fontSize: 28, flexShrink: 0 }}>⟠</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>Need ETH for gas fees?</div>
+              <div style={{ fontSize: 12, color: '#8888AA', lineHeight: 1.5 }}>
+                New to Robinhood Chain? You'll need ETH to pay gas fees. Claim free testnet ETH from the official Robinhood faucet.
+              </div>
+            </div>
+            <a href="https://faucet.testnet.chain.robinhood.com/" target="_blank" rel="noopener noreferrer"
+              style={{ padding: '8px 16px', background: 'rgba(98,126,234,.15)', border: '1px solid rgba(98,126,234,.3)', borderRadius: 8, color: '#7289da', fontSize: 12, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              Get ETH →
+            </a>
+          </div>
+        </div>
+
       </div>
 
       <BottomBar />
