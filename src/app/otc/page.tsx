@@ -1,33 +1,26 @@
 'use client';
 import { useState } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
-import { parseEther, parseUnits, formatEther } from 'viem';
+import { parseEther, parseUnits } from 'viem';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Navbar from '@/components/Navbar';
 import LiveTicker from '@/components/LiveTicker';
 import BottomBar from '@/components/BottomBar';
 import SuccessModal from '@/components/SuccessModal';
 import { publicClient } from '@/lib/client';
-import { useOTCListings, useOTCListing, OTCListing, OTCOffer } from '@/hooks/useOTC';
+import { useOTCListings, OTCListing } from '@/hooks/useOTC';
 import { useTokenInfo } from '@/hooks/useWallet';
-import { CONTRACTS, FEES } from '@/lib/constants';
+import { CONTRACTS, FEES, KNOWN_TOKENS } from '@/lib/constants';
 import { OTC_ABI, ERC20_ABI } from '@/abis';
-import { short, fmtETH, fmtToken, ago, fillLabel, addrLink, tokenColor } from '@/lib/utils';
-
-const ZERO = '0x0000000000000000000000000000000000000000';
+import { short, fmtETH, fmtToken, ago, fillLabel, addrLink, tokenColor, tweetUrl } from '@/lib/utils';
 
 function Avatar({ address, size }: { address: string; size: number }) {
   const info = useTokenInfo(address as `0x${string}`);
   const sym = info?.symbol?.slice(0, 2) ?? '??';
   const col = info ? tokenColor(info.symbol) : '#C8F000';
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%',
-      background: col + '20', border: '1px solid ' + col + '40',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.32, fontWeight: 900,
-      fontFamily: 'Space Mono, monospace', color: col, flexShrink: 0,
-    }}>
+    <div style={{ width: size, height: size, borderRadius: '50%', background: col + '20', border: '1px solid ' + col + '40', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.32, fontWeight: 900, fontFamily: 'Space Mono,monospace', color: col, flexShrink: 0 }}>
       {sym}
     </div>
   );
@@ -35,11 +28,10 @@ function Avatar({ address, size }: { address: string; size: number }) {
 
 function Row({ l, onSelect }: { l: OTCListing; onSelect: () => void }) {
   const info = useTokenInfo(l.tokenAddress);
-  const filled = l.totalAmount > 0n
-    ? Number((l.totalAmount - l.remainingAmount) * 100n / l.totalAmount)
-    : 0;
+  const filled = l.totalAmount > 0n ? Number((l.totalAmount - l.remainingAmount) * 100n / l.totalAmount) : 0;
+  const router = useRouter();
   return (
-    <tr onClick={onSelect}>
+    <tr onClick={() => router.push(`/listing/${l.id.toString()}`)}>
       <td className="muted mono" style={{ fontSize: 11 }}>#{l.id.toString()}</td>
       <td>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -51,7 +43,7 @@ function Row({ l, onSelect }: { l: OTCListing; onSelect: () => void }) {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
               <span className="mono muted" style={{ fontSize: 9 }}>{short(l.tokenAddress)}</span>
-              <a href={addrLink(l.tokenAddress)} target="_blank" rel="noopener noreferrer" className="scan-btn">🔍 Scan</a>
+              <a href={addrLink(l.tokenAddress)} target="_blank" rel="noopener noreferrer" className="scan-btn" onClick={e => e.stopPropagation()}>🔍 Scan</a>
             </div>
           </div>
         </div>
@@ -59,55 +51,84 @@ function Row({ l, onSelect }: { l: OTCListing; onSelect: () => void }) {
       <td className="r mono" style={{ fontSize: 11 }}>{fmtToken(l.remainingAmount, info?.decimals ?? 18)}</td>
       <td className="r mono" style={{ fontSize: 11, color: '#C8F000' }}>{fmtETH(l.priceForFull)} ETH</td>
       <td className="r" style={{ fontSize: 11 }}>{l.acceptsAnyToken ? 'Any' : 'ETH/USDT'}</td>
-      <td className="r">
-        <span className={`badge ${l.fillTerms === 0 ? 'badge-green' : 'badge-lime'}`} style={{ fontSize: 9 }}>
-          {fillLabel(l.fillTerms)}
-        </span>
-      </td>
+      <td className="r"><span className={`badge ${l.fillTerms === 0 ? 'badge-green' : 'badge-lime'}`} style={{ fontSize: 9 }}>{fillLabel(l.fillTerms)}</span></td>
       <td className="r">
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
           <span style={{ fontSize: 11, color: filled > 0 ? '#00C805' : '#44445A' }}>{filled}%</span>
-          <div className="bar" style={{ width: 52 }}>
-            <div className="bar-fill" style={{ width: `${filled}%` }} />
-          </div>
+          <div className="bar" style={{ width: 52 }}><div className="bar-fill" style={{ width: `${filled}%` }} /></div>
         </div>
       </td>
-      <td className="r">
-        <span className="badge badge-gold" style={{ fontSize: 9 }}>💬 {l.offerCount.toString()}</span>
-      </td>
+      <td className="r"><span className="badge badge-gold" style={{ fontSize: 9 }}>💬 {l.offerCount.toString()}</span></td>
       <td className="r muted mono" style={{ fontSize: 10 }}>{ago(l.createdAt)}</td>
       <td className="r" onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-          <button className="btn btn-lime" style={{ padding: '5px 9px', fontSize: 11, borderRadius: 6 }} onClick={onSelect}>Buy</button>
-          <button className="btn btn-ghost" style={{ padding: '5px 9px', fontSize: 11, borderRadius: 6 }} onClick={onSelect}>Offer</button>
+          <button className="btn btn-lime" style={{ padding: '5px 9px', fontSize: 11, borderRadius: 6 }} onClick={() => useRouter().push(`/listing/${l.id.toString()}`)}>View</button>
         </div>
       </td>
     </tr>
   );
 }
 
+function SettledRow({ l }: { l: OTCListing }) {
+  const info = useTokenInfo(l.tokenAddress);
+  const filled = l.totalAmount > 0n ? Number((l.totalAmount - l.remainingAmount) * 100n / l.totalAmount) : 0;
+  return (
+    <tr>
+      <td className="muted mono" style={{ fontSize: 11 }}>#{l.id.toString()}</td>
+      <td>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <Avatar address={l.tokenAddress} size={28} />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>{info?.name ?? short(l.tokenAddress)} <span className="muted" style={{ fontWeight: 400, fontSize: 10 }}>{info?.symbol}</span></div>
+            <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+              <span className="mono muted" style={{ fontSize: 9 }}>{short(l.tokenAddress)}</span>
+              <a href={addrLink(l.tokenAddress)} target="_blank" rel="noopener noreferrer" className="scan-btn">🔍</a>
+            </div>
+          </div>
+        </div>
+      </td>
+      <td className="r mono" style={{ fontSize: 11 }}>{fmtToken(l.totalAmount, info?.decimals ?? 18)}</td>
+      <td className="r mono" style={{ fontSize: 11 }}>{fmtETH(l.priceForFull)} ETH</td>
+      <td className="r">
+        <span style={{ fontSize: 11, color: filled === 100 ? '#00C805' : filled > 0 ? '#F5A623' : '#44445A' }}>
+          {filled === 100 ? '✅ Fully Sold' : filled > 0 ? `${filled}% Sold` : '↩️ Cancelled'}
+        </span>
+      </td>
+      <td className="r muted mono" style={{ fontSize: 10 }}>{short(l.seller)}</td>
+      <td className="r muted mono" style={{ fontSize: 10 }}>{ago(l.createdAt)}</td>
+    </tr>
+  );
+}
+
+// ─── List Token Modal ─────────────────────────────────────────────────────────
 function ListModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (h: `0x${string}`) => void }) {
   const { data: wc } = useWalletClient();
+  const { address } = useAccount();
   const [tokenCA, setTokenCA] = useState('');
   const [tokenInfo, setTI] = useState<{ name: string; symbol: string; decimals: number } | null>(null);
+  const [userBal, setUserBal] = useState<bigint | null>(null);
   const [amount, setAmount] = useState('');
   const [price, setPrice] = useState('');
   const [fill, setFill] = useState(0);
-  const [anyTok, setAnyTok] = useState(false);
+  // Payment: 0=ETH only, 1=USDT only, 2=ETH+USDT
+  const [payMode, setPayMode] = useState(0);
   const [desc, setDesc] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
 
   async function lookup() {
-    if (!tokenCA.startsWith('0x')) { toast.error('Enter a valid contract address'); return; }
+    if (!tokenCA.startsWith('0x') || tokenCA.length !== 42) { toast.error('Enter a valid contract address'); return; }
     try {
       const addr = tokenCA as `0x${string}`;
-      const [n, s, d] = await Promise.all([
+      const calls: Promise<any>[] = [
         publicClient.readContract({ address: addr, abi: ERC20_ABI, functionName: 'name' }),
         publicClient.readContract({ address: addr, abi: ERC20_ABI, functionName: 'symbol' }),
         publicClient.readContract({ address: addr, abi: ERC20_ABI, functionName: 'decimals' }),
-      ]);
+      ];
+      if (address) calls.push(publicClient.readContract({ address: addr, abi: ERC20_ABI, functionName: 'balanceOf', args: [address as `0x${string}`] }));
+      const [n, s, d, bal] = await Promise.all(calls);
       setTI({ name: n as string, symbol: s as string, decimals: Number(d) });
+      if (bal !== undefined) setUserBal(bal as bigint);
       toast.success(`Found: ${n} (${s})`);
     } catch { toast.error('Token not found on Robinhood Chain'); }
   }
@@ -119,22 +140,26 @@ function ListModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (h:
       const addr = tokenCA as `0x${string}`;
       const tokenAmt = parseUnits(amount, tokenInfo.decimals);
       const priceWei = parseEther(price);
+      // acceptedTokens: [] means ETH only. We pass USDT addr if USDT accepted
+      const acceptsAny = payMode === 2; // ETH+USDT = acceptsAnyToken true for USDT
+      const acceptedTokens: `0x${string}`[] = payMode === 1 ? [CONTRACTS.USDT] : [];
+
       setStep(1);
       toast.loading('Step 1/2 — Approving token…');
-      const appTx = await wc.writeContract({ address: addr, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.OTC, tokenAmt] });
-      await publicClient.waitForTransactionReceipt({ hash: appTx as `0x${string}` });
-      toast.dismiss();
-      toast.success('Approved!');
+      const ap = await wc.writeContract({ address: addr, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.OTC, tokenAmt] });
+      await publicClient.waitForTransactionReceipt({ hash: ap as `0x${string}` });
+      toast.dismiss(); toast.success('Approved!');
+
       setStep(2);
-      toast.loading('Step 2/2 — Listing token…');
-      const listTx = await wc.writeContract({
+      toast.loading('Step 2/2 — Listing…');
+      const tx = await wc.writeContract({
         address: CONTRACTS.OTC, abi: OTC_ABI, functionName: 'listToken',
-        args: [addr, tokenAmt, priceWei, [], anyTok, fill, desc],
+        args: [addr, tokenAmt, priceWei, acceptedTokens, acceptsAny, fill, desc],
         value: FEES.LIST,
       });
-      await publicClient.waitForTransactionReceipt({ hash: listTx as `0x${string}` });
+      await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
       toast.dismiss();
-      onSuccess(listTx as `0x${string}`);
+      onSuccess(tx as `0x${string}`);
     } catch (e: any) {
       toast.dismiss();
       toast.error(e?.shortMessage ?? e?.message ?? 'Transaction failed');
@@ -143,42 +168,70 @@ function ListModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (h:
     setBusy(false);
   }
 
+  const PAY_MODES = [
+    { v: 0, l: 'ETH Only',    d: 'Buyers must pay with ETH' },
+    { v: 1, l: 'USDT Only',   d: 'Buyers must pay with USDT' },
+    { v: 2, l: 'ETH + USDT',  d: 'Buyer can choose ETH or USDT' },
+  ];
+
+  const SUGGESTED = Object.entries(KNOWN_TOKENS).map(([addr, info]) => ({ addr, ...info }));
+
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">List Your Token</div>
         <div className="modal-sub">Fee: 0.002 ETH · 2 transactions</div>
 
+        {/* Steps */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
           {['Approve', 'List'].map((lbl, i) => (
             <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 6, flex: i < 1 ? 'none' : 1 }}>
-              <div className={`step ${step > i ? 'step-done' : step === i ? 'step-active' : 'step-todo'}`}>
-                {step > i ? '✓' : i + 1}
-              </div>
+              <div className={`step ${step > i ? 'step-done' : step === i ? 'step-active' : 'step-todo'}`}>{step > i ? '✓' : i + 1}</div>
               <span style={{ fontSize: 11, color: '#8888AA' }}>{lbl}</span>
               {i < 1 && <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.1)' }} />}
             </div>
           ))}
         </div>
 
-        <div style={{ marginBottom: 14 }}>
+        {/* Token CA */}
+        <div style={{ marginBottom: 10 }}>
           <label className="label">Token Contract Address *</label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input className="input" placeholder="0x…" value={tokenCA} onChange={e => setTokenCA(e.target.value)} style={{ flex: 1 }} />
+            <input className="input" placeholder="0x…" value={tokenCA} onChange={e => { setTokenCA(e.target.value); setTI(null); setUserBal(null); }} style={{ flex: 1 }} />
             <button className="btn btn-ghost" style={{ padding: '0 14px', fontSize: 12, borderRadius: 8, whiteSpace: 'nowrap' }} onClick={lookup}>Look up</button>
           </div>
           {tokenInfo && (
-            <div style={{ marginTop: 6, padding: '7px 10px', background: 'rgba(0,200,5,.07)', border: '1px solid rgba(0,200,5,.15)', borderRadius: 6, fontSize: 11, color: '#00C805' }}>
+            <div style={{ marginTop: 6, padding: '8px 10px', background: userBal && userBal > 0n ? 'rgba(0,200,5,.07)' : 'rgba(245,166,35,.07)', border: `1px solid ${userBal && userBal > 0n ? 'rgba(0,200,5,.2)' : 'rgba(245,166,35,.2)'}`, borderRadius: 6, fontSize: 11, color: userBal && userBal > 0n ? '#00C805' : '#F5A623' }}>
               ✓ {tokenInfo.name} ({tokenInfo.symbol}) · {tokenInfo.decimals} decimals
+              {userBal !== null && <span style={{ marginLeft: 8 }}>· Your balance: <strong>{fmtToken(userBal, tokenInfo.decimals)} {tokenInfo.symbol}</strong></span>}
+              {userBal !== null && userBal === 0n && <span style={{ marginLeft: 4 }}>⚠️ You have 0 of this token</span>}
             </div>
           )}
+        </div>
+
+        {/* Suggested tokens */}
+        <div style={{ marginBottom: 14 }}>
+          <label className="label">Suggested Tokens</label>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {SUGGESTED.map(t => (
+              <button key={t.addr} onClick={() => { setTokenCA(t.addr); setTI(null); setUserBal(null); setTimeout(() => { setTokenCA(t.addr); }, 50); }}
+                style={{ padding: '4px 10px', background: tokenCA === t.addr ? 'rgba(200,240,0,.1)' : 'rgba(255,255,255,.04)', border: `1px solid ${tokenCA === t.addr ? '#C8F000' : 'rgba(255,255,255,.1)'}`, borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', color: tokenCA === t.addr ? '#C8F000' : '#8888AA', fontFamily: 'DM Sans,sans-serif' }}>
+                {t.symbol}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="label">Amount to List *</label>
             <input className="input" type="number" placeholder="e.g. 50000" value={amount} onChange={e => setAmount(e.target.value)} />
+            {userBal && tokenInfo && amount && parseFloat(amount) > 0 && (
+              <div style={{ fontSize: 10, color: parseUnits(amount, tokenInfo.decimals) > userBal ? '#FF4444' : '#00C805', marginTop: 4 }}>
+                {parseUnits(amount, tokenInfo.decimals) > userBal ? '⚠️ Exceeds your balance' : `✓ ${fmtToken(userBal, tokenInfo.decimals)} available`}
+              </div>
+            )}
           </div>
           <div>
             <label className="label">Price for 100% (ETH) *</label>
@@ -206,15 +259,18 @@ function ListModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (h:
 
         <div style={{ marginBottom: 14 }}>
           <label className="label">Accepted Payment</label>
-          {[{ v: false, l: 'ETH + USDT', d: 'Accept Ether and USDT only' }, { v: true, l: 'Any token', d: '⚠️ Verify token values — anyone can offer anything' }].map(o => (
-            <div key={String(o.v)} onClick={() => setAnyTok(o.v)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', marginBottom: 7, borderRadius: 7, cursor: 'pointer', border: `1px solid ${anyTok === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: anyTok === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
-              <div style={{ fontSize: 14 }}>{o.v ? '🔄' : '💱'}</div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 700 }}>{o.l}</div>
-                <div style={{ fontSize: 10, color: '#8888AA' }}>{o.d}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {PAY_MODES.map(o => (
+              <div key={o.v} onClick={() => setPayMode(o.v)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 7, cursor: 'pointer', border: `1px solid ${payMode === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: payMode === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
+                <div style={{ fontSize: 14 }}>{o.v === 0 ? '⟠' : o.v === 1 ? '💵' : '💱'}</div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{o.l}</div>
+                  <div style={{ fontSize: 10, color: '#8888AA' }}>{o.d}</div>
+                </div>
+                {payMode === o.v && <div style={{ marginLeft: 'auto', color: '#C8F000', fontSize: 14 }}>✓</div>}
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         <div style={{ marginBottom: 16 }}>
@@ -227,330 +283,27 @@ function ListModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (h:
         </div>
 
         <button className="btn btn-lime" style={{ width: '100%', padding: '12px 0', fontSize: 14 }} disabled={busy || !tokenInfo || !amount || !price} onClick={submit}>
-          {busy
-            ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><span className="spinner spinner-black" />Processing…</span>
-            : 'Approve & List Token'}
+          {busy ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><span className="spinner spinner-black" />Processing…</span> : 'Approve & List Token'}
         </button>
       </div>
     </div>
   );
 }
 
-function DetailModal({ id, userAddr, onClose, onBuy, onOffer, onAccept }: {
-  id: bigint;
-  userAddr: `0x${string}` | undefined;
-  onClose: () => void;
-  onBuy: (h: `0x${string}`, d: any) => void;
-  onOffer: (h: `0x${string}`) => void;
-  onAccept: (h: `0x${string}`) => void;
-}) {
-  const { listing: l, offers, loading, refetch } = useOTCListing(id);
-  const info = useTokenInfo(l?.tokenAddress ?? null);
-  const { data: wc } = useWalletClient();
-  const [tab, setTab] = useState<'buy' | 'offer'>('buy');
-  const [buyHalf, setBuyHalf] = useState(false);
-  const [oTok, setOTok] = useState<'eth' | 'usdt' | 'other'>('eth');
-  const [oCA, setOCA] = useState('');
-  const [oAmt, setOAmt] = useState('');
-  const [oHalf, setOHalf] = useState(false);
-  const [oMsg, setOMsg] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const isSeller = l?.seller?.toLowerCase() === userAddr?.toLowerCase();
-  const filled = l && l.totalAmount > 0n
-    ? Number((l.totalAmount - l.remainingAmount) * 100n / l.totalAmount)
-    : 0;
-
-  async function doBuy() {
-    if (!wc || !l) return;
-    setBusy(true);
-    try {
-      toast.loading('Processing purchase…');
-      const p = buyHalf ? l.pricePerHalf : l.priceForFull;
-      const tx = await wc.writeContract({
-        address: CONTRACTS.OTC, abi: OTC_ABI, functionName: 'buyWithETH',
-        args: [l.id, buyHalf], value: p + FEES.BUY,
-      });
-      await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
-      toast.dismiss();
-      onBuy(tx as `0x${string}`, {
-        amount: fmtToken(buyHalf ? l.totalAmount / 2n : l.remainingAmount, info?.decimals ?? 18),
-        token: info?.symbol,
-      });
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
-    setBusy(false);
-  }
-
-  async function doOffer() {
-    if (!wc || !l || !oAmt) return;
-    setBusy(true);
-    try {
-      toast.loading('Submitting offer…');
-      let tx: `0x${string}`;
-      if (oTok === 'eth') {
-        const wei = parseEther(oAmt);
-        tx = await wc.writeContract({
-          address: CONTRACTS.OTC, abi: OTC_ABI, functionName: 'makeOfferWithETH',
-          args: [l.id, oHalf, oMsg], value: wei + FEES.OFFER,
-        }) as `0x${string}`;
-      } else {
-        const tAddr = oTok === 'usdt' ? CONTRACTS.USDT : oCA as `0x${string}`;
-        const dec = oTok === 'usdt' ? 6 : 18;
-        const amt = parseUnits(oAmt, dec);
-        const ap = await wc.writeContract({ address: tAddr, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.OTC, amt] });
-        await publicClient.waitForTransactionReceipt({ hash: ap as `0x${string}` });
-        tx = await wc.writeContract({
-          address: CONTRACTS.OTC, abi: OTC_ABI, functionName: 'makeOfferWithToken',
-          args: [l.id, oHalf, tAddr, amt, oMsg], value: FEES.OFFER,
-        }) as `0x${string}`;
-      }
-      await publicClient.waitForTransactionReceipt({ hash: tx });
-      toast.dismiss();
-      onOffer(tx);
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
-    setBusy(false);
-  }
-
-  async function doAccept(offerId: bigint) {
-    if (!wc) return;
-    setBusy(true);
-    try {
-      toast.loading('Accepting offer…');
-      const tx = await wc.writeContract({ address: CONTRACTS.OTC, abi: OTC_ABI, functionName: 'acceptOffer', args: [offerId] });
-      await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
-      toast.dismiss();
-      refetch();
-      onAccept(tx as `0x${string}`);
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
-    setBusy(false);
-  }
-
-  async function doIgnore(offerId: bigint) {
-    if (!wc) return;
-    setBusy(true);
-    try {
-      toast.loading('Ignoring offer…');
-      const tx = await wc.writeContract({ address: CONTRACTS.OTC, abi: OTC_ABI, functionName: 'ignoreOffer', args: [offerId] });
-      await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
-      toast.dismiss();
-      toast.success('Offer ignored — funds returned to maker');
-      refetch();
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
-    setBusy(false);
-  }
-
-  if (loading || !l) {
-    return (
-      <div className="modal-bg" onClick={onClose}>
-        <div className="modal" style={{ textAlign: 'center', padding: 60 }}>
-          <span className="spinner" style={{ width: 36, height: 36, borderWidth: 3 }} />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 600 }} onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>✕</button>
-
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
-          <Avatar address={l.tokenAddress} size={50} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 2 }}>
-              {info?.name ?? short(l.tokenAddress)}
-              <span className="muted" style={{ fontSize: 14, fontWeight: 400, marginLeft: 6 }}>{info?.symbol}</span>
-            </div>
-            <div style={{ fontFamily: 'Space Mono,monospace', fontSize: 9, color: '#44445A', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              {l.tokenAddress}
-              <a href={addrLink(l.tokenAddress)} target="_blank" rel="noopener noreferrer" className="scan-btn">🔍 BlockScan ↗</a>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <span className={`badge ${l.fillTerms === 0 ? 'badge-green' : 'badge-lime'}`}>{fillLabel(l.fillTerms)}</span>
-              <span className="badge badge-lime">{l.acceptsAnyToken ? 'Any token' : 'ETH / USDT'}</span>
-              <span className="badge badge-gold">#{l.id.toString()}</span>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9, marginBottom: 14 }}>
-          {[
-            { k: 'Total Listed', v: fmtToken(l.totalAmount, info?.decimals ?? 18) },
-            { k: 'Remaining', v: fmtToken(l.remainingAmount, info?.decimals ?? 18) },
-            { k: 'Price (100%)', v: `${fmtETH(l.priceForFull)} ETH`, c: '#C8F000' },
-            { k: 'Offers', v: l.offerCount.toString(), c: '#F5A623' },
-          ].map(s => (
-            <div key={s.k} style={{ background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 9, padding: 11, textAlign: 'center' }}>
-              <div style={{ fontSize: 9, color: '#44445A', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4, fontFamily: 'Space Mono,monospace' }}>{s.k}</div>
-              <div style={{ fontFamily: 'Space Mono,monospace', fontSize: 14, fontWeight: 700, color: s.c ?? '#fff' }}>{s.v}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#8888AA', marginBottom: 5 }}>
-            <span>Fill progress</span>
-            <span style={{ color: filled > 0 ? '#00C805' : '#44445A' }}>{filled}% filled</span>
-          </div>
-          <div className="bar">
-            <div className="bar-fill" style={{ width: `${filled}%` }} />
-          </div>
-        </div>
-
-        {l.description ? (
-          <div style={{ padding: 12, background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 8, fontSize: 12, color: '#8888AA', lineHeight: 1.6, fontStyle: 'italic', marginBottom: 14 }}>
-            "{l.description}"
-          </div>
-        ) : null}
-
-        {offers.length > 0 && (
-          <div style={{ background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 10, marginBottom: 14, overflow: 'hidden' }}>
-            <div style={{ padding: '11px 14px', borderBottom: '1px solid rgba(255,255,255,.07)', fontSize: 13, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              Active Offers
-              <span className="badge badge-gold">{offers.length} offer{offers.length > 1 ? 's' : ''}</span>
-            </div>
-            {offers.map((o: OTCOffer) => (
-              <div key={o.id.toString()} style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,.03)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#1C1C35', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, fontFamily: 'Space Mono,monospace', flexShrink: 0 }}>
-                  {o.offerMaker.slice(2, 4).toUpperCase()}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'Space Mono,monospace', fontSize: 10, color: '#8888AA' }}>{short(o.offerMaker)}</div>
-                  <div style={{ fontSize: 10, color: '#44445A', marginTop: 1 }}>
-                    {o.forHalf ? '50%' : '100%'} · {o.offerToken === ZERO ? 'ETH' : 'Token'}
-                    {o.message ? ` · "${o.message}"` : ''}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right', marginRight: isSeller ? 8 : 0 }}>
-                  <div style={{ fontFamily: 'Space Mono,monospace', fontSize: 12, fontWeight: 700, color: '#C8F000' }}>
-                    {o.offerToken === ZERO ? `${fmtETH(o.offerAmount)} ETH` : fmtToken(o.offerAmount, 6)}
-                  </div>
-                  <div style={{ fontSize: 10, color: '#44445A', fontFamily: 'Space Mono,monospace' }}>{ago(o.createdAt)}</div>
-                </div>
-                {isSeller && (
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button disabled={busy} onClick={() => doAccept(o.id)} style={{ padding: '4px 8px', background: '#00C805', border: 'none', borderRadius: 4, color: '#000', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Accept</button>
-                    <button disabled={busy} onClick={() => doIgnore(o.id)} style={{ padding: '4px 8px', background: '#1C1C35', border: '1px solid rgba(255,255,255,.1)', borderRadius: 4, color: '#8888AA', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Ignore</button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!isSeller && (
-          <div style={{ background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 10, padding: 16 }}>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-              {(['buy', 'offer'] as const).map(t => (
-                <button key={t} className={`sub-tab ${tab === t ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => setTab(t)}>
-                  {t === 'buy' ? 'Buy Now' : 'Make Offer'}
-                </button>
-              ))}
-            </div>
-
-            {tab === 'buy' && (
-              <div>
-                {l.fillTerms === 0 && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-                    {[
-                      { v: false, label: '100%', amt: l.remainingAmount, p: l.priceForFull },
-                      { v: true, label: '50%', amt: l.totalAmount / 2n, p: l.pricePerHalf },
-                    ].map(o => (
-                      <div key={String(o.v)} onClick={() => setBuyHalf(o.v)} style={{ padding: 10, cursor: 'pointer', borderRadius: 7, textAlign: 'center', border: `1px solid ${buyHalf === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: buyHalf === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
-                        <div style={{ fontSize: 13, fontWeight: 700 }}>{o.label}</div>
-                        <div style={{ fontSize: 10, color: '#8888AA' }}>{fmtToken(o.amt, info?.decimals ?? 18)} {info?.symbol}</div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#C8F000', marginTop: 3 }}>{fmtETH(o.p)} ETH</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div style={{ padding: '10px 14px', background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 8, marginBottom: 14 }}>
-                  {[
-                    { k: 'You receive', v: `${fmtToken(buyHalf ? l.totalAmount / 2n : l.remainingAmount, info?.decimals ?? 18)} ${info?.symbol ?? ''}` },
-                    { k: 'Token price', v: `${fmtETH(buyHalf ? l.pricePerHalf : l.priceForFull)} ETH` },
-                    { k: 'Protocol fee', v: '0.002 ETH' },
-                    { k: 'Total', v: `${fmtETH((buyHalf ? l.pricePerHalf : l.priceForFull) + FEES.BUY)} ETH`, bold: true, c: '#C8F000' },
-                  ].map(r => (
-                    <div key={r.k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 12, borderTop: r.bold ? '1px solid rgba(255,255,255,.07)' : 'none', marginTop: r.bold ? 4 : 0, paddingTop: r.bold ? 8 : 4 }}>
-                      <span style={{ color: r.bold ? '#fff' : '#8888AA', fontWeight: r.bold ? 700 : 400 }}>{r.k}</span>
-                      <span style={{ fontFamily: 'Space Mono,monospace', fontWeight: r.bold ? 700 : 600, color: r.c ?? '#fff', fontSize: r.bold ? 14 : 12 }}>{r.v}</span>
-                    </div>
-                  ))}
-                </div>
-                <button className="btn btn-lime" style={{ width: '100%', padding: '12px 0', fontSize: 14 }} disabled={busy} onClick={doBuy}>
-                  {busy
-                    ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><span className="spinner spinner-black" />Processing…</span>
-                    : `Buy Now — ${fmtETH((buyHalf ? l.pricePerHalf : l.priceForFull) + FEES.BUY)} ETH`}
-                </button>
-              </div>
-            )}
-
-            {tab === 'offer' && (
-              <div>
-                <div style={{ padding: '9px 12px', background: 'rgba(245,166,35,.07)', border: '1px solid rgba(245,166,35,.2)', borderRadius: 7, fontSize: 11, color: '#F5A623', marginBottom: 14 }}>
-                  ⚠️ Offer fee 0.001 ETH (non-refundable). Verify token values before offering unknown tokens.
-                </div>
-                <label className="label">Offer With</label>
-                {[
-                  { v: 'eth', icon: '⟠', l: 'ETH', d: 'Native Ether' },
-                  { v: 'usdt', icon: '💵', l: 'USDT', d: 'Testnet stablecoin' },
-                  { v: 'other', icon: '🪙', l: 'Other Token', d: '⚠️ Seller may ignore unrecognised tokens' },
-                ].map(o => (
-                  <div key={o.v} onClick={() => setOTok(o.v as any)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', marginBottom: 7, borderRadius: 7, cursor: 'pointer', border: `1px solid ${oTok === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: oTok === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
-                    <span style={{ fontSize: 16 }}>{o.icon}</span>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 700 }}>{o.l}</div>
-                      <div style={{ fontSize: 10, color: '#8888AA' }}>{o.d}</div>
-                    </div>
-                  </div>
-                ))}
-                {oTok === 'other' && (
-                  <input className="input" placeholder="Token contract address 0x…" value={oCA} onChange={e => setOCA(e.target.value)} style={{ marginBottom: 12 }} />
-                )}
-                {l.fillTerms === 0 && (
-                  <div>
-                    <label className="label" style={{ marginTop: 4 }}>Fill Amount</label>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                      {[{ v: false, l: '100%' }, { v: true, l: '50%' }].map(o => (
-                        <div key={String(o.v)} onClick={() => setOHalf(o.v)} style={{ padding: '8px 0', cursor: 'pointer', borderRadius: 7, textAlign: 'center', border: `1px solid ${oHalf === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: oHalf === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35', fontSize: 13, fontWeight: 700 }}>
-                          {o.l}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <input className="input" type="number" placeholder={`Offer amount (${oTok === 'eth' ? 'ETH' : oTok === 'usdt' ? 'USDT' : 'tokens'})`} value={oAmt} onChange={e => setOAmt(e.target.value)} style={{ marginBottom: 10 }} />
-                <textarea className="input" rows={2} placeholder="Message to seller (optional)" value={oMsg} onChange={e => setOMsg(e.target.value)} style={{ resize: 'vertical', marginBottom: 14 }} />
-                <button className="btn btn-lime" style={{ width: '100%', padding: '12px 0', fontSize: 14 }} disabled={busy || !oAmt} onClick={doOffer}>
-                  {busy
-                    ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><span className="spinner spinner-black" />Processing…</span>
-                    : 'Submit Offer — Pay 0.001 ETH Fee'}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {isSeller && (
-          <div style={{ marginTop: 14, padding: '12px 14px', background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 8, fontSize: 12, color: '#8888AA', textAlign: 'center' }}>
-            This is your listing. Accept / ignore offers above, or go to Portfolio to edit / cancel.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
+// ─── Main OTC Page ────────────────────────────────────────────────────────────
 export default function OTCPage() {
   const { address, isConnected } = useAccount();
-  const { listings, loading, error, refetch } = useOTCListings();
+  const router = useRouter();
+  const { listings, settled, loading, error, refetch } = useOTCListings();
   const [showList, setShowList] = useState(false);
-  const [selected, setSelected] = useState<bigint | null>(null);
   const [tab, setTab] = useState<'listed' | 'settled'>('listed');
   const [search, setSearch] = useState('');
   const [success, setSuccess] = useState<{ type: any; details?: any } | null>(null);
 
   const filtered = listings.filter(l =>
+    search === '' || l.tokenAddress.toLowerCase().includes(search.toLowerCase())
+  );
+  const filteredSettled = settled.filter(l =>
     search === '' || l.tokenAddress.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -561,8 +314,12 @@ export default function OTCPage() {
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 20px', borderBottom: '1px solid rgba(255,255,255,.07)', background: '#0F0F1C' }}>
         <div style={{ display: 'flex', gap: 4 }}>
-          <button className={`sub-tab ${tab === 'listed' ? 'active' : ''}`} onClick={() => setTab('listed')}>Listed Market</button>
-          <button className={`sub-tab ${tab === 'settled' ? 'active' : ''}`} onClick={() => setTab('settled')}>Settled Market</button>
+          <button className={`sub-tab ${tab === 'listed' ? 'active' : ''}`} onClick={() => setTab('listed')}>
+            Listed Market {!loading && <span style={{ fontSize: 10, color: '#8888AA', marginLeft: 4 }}>({listings.length})</span>}
+          </button>
+          <button className={`sub-tab ${tab === 'settled' ? 'active' : ''}`} onClick={() => setTab('settled')}>
+            Settled Market {!loading && <span style={{ fontSize: 10, color: '#8888AA', marginLeft: 4 }}>({settled.length})</span>}
+          </button>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 6 }}>
@@ -580,7 +337,7 @@ export default function OTCPage() {
         {loading && (
           <div style={{ textAlign: 'center', padding: 64 }}>
             <span className="spinner" style={{ width: 36, height: 36, borderWidth: 3 }} />
-            <div style={{ marginTop: 12, fontSize: 13, color: '#44445A' }}>Loading listings from Robinhood Chain…</div>
+            <div style={{ marginTop: 12, fontSize: 13, color: '#44445A' }}>Loading listings…</div>
           </div>
         )}
         {!loading && error && (
@@ -590,47 +347,65 @@ export default function OTCPage() {
             <button className="btn btn-ghost" style={{ padding: '9px 22px' }} onClick={refetch}>Retry</button>
           </div>
         )}
-        {!loading && !error && tab === 'listed' && filtered.length === 0 && (
-          <div className="empty">
-            <div className="empty-icon">🪙</div>
-            <div className="empty-title">{search ? 'No listings match your search' : 'No listings yet'}</div>
-            <div className="empty-desc">{search ? 'Try a different contract address.' : 'Be the first to list a token on VENDR Market.'}</div>
-            {!search && (
-              <button className="btn btn-lime" style={{ marginTop: 20, padding: '10px 26px', fontSize: 13 }} onClick={() => isConnected ? setShowList(true) : toast.error('Connect wallet first')}>
-                + List Your First Token
-              </button>
-            )}
-          </div>
+
+        {/* LISTED MARKET */}
+        {!loading && !error && tab === 'listed' && (
+          filtered.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon">🪙</div>
+              <div className="empty-title">{search ? 'No listings match your search' : 'No listings yet'}</div>
+              <div className="empty-desc">{search ? 'Try a different contract address.' : 'Be the first to list a token on VENDR Market.'}</div>
+              {!search && <button className="btn btn-lime" style={{ marginTop: 20, padding: '10px 26px', fontSize: 13 }} onClick={() => isConnected ? setShowList(true) : toast.error('Connect wallet first')}>+ List Your First Token</button>}
+            </div>
+          ) : (
+            <table className="tbl" style={{ marginTop: 4 }}>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Token</th>
+                  <th className="r">Remaining</th>
+                  <th className="r">Price (100%)</th>
+                  <th className="r">Accepts</th>
+                  <th className="r">Fill</th>
+                  <th className="r">Filled</th>
+                  <th className="r">Offers</th>
+                  <th className="r">Listed</th>
+                  <th className="r">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(l => <Row key={l.id.toString()} l={l} onSelect={() => router.push(`/listing/${l.id.toString()}`)} />)}
+              </tbody>
+            </table>
+          )
         )}
+
+        {/* SETTLED MARKET */}
         {!loading && !error && tab === 'settled' && (
-          <div className="empty">
-            <div className="empty-icon">📊</div>
-            <div className="empty-title">No settled trades yet</div>
-            <div className="empty-desc">Completed trades will appear here.</div>
-          </div>
-        )}
-        {!loading && !error && tab === 'listed' && filtered.length > 0 && (
-          <table className="tbl" style={{ marginTop: 4 }}>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Token</th>
-                <th className="r">Remaining</th>
-                <th className="r">Price (100%)</th>
-                <th className="r">Accepts</th>
-                <th className="r">Fill</th>
-                <th className="r">Filled</th>
-                <th className="r">Offers</th>
-                <th className="r">Listed</th>
-                <th className="r">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(l => (
-                <Row key={l.id.toString()} l={l} onSelect={() => setSelected(l.id)} />
-              ))}
-            </tbody>
-          </table>
+          filteredSettled.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon">📊</div>
+              <div className="empty-title">No settled trades yet</div>
+              <div className="empty-desc">Completed and cancelled listings will appear here.</div>
+            </div>
+          ) : (
+            <table className="tbl" style={{ marginTop: 4 }}>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Token</th>
+                  <th className="r">Amount</th>
+                  <th className="r">Listed Price</th>
+                  <th className="r">Status</th>
+                  <th className="r">Seller</th>
+                  <th className="r">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSettled.map(l => <SettledRow key={l.id.toString()} l={l} />)}
+              </tbody>
+            </table>
+          )
         )}
       </div>
 
@@ -640,16 +415,6 @@ export default function OTCPage() {
         <ListModal
           onClose={() => setShowList(false)}
           onSuccess={h => { setShowList(false); setSuccess({ type: 'listed', details: { txHash: h } }); refetch(); }}
-        />
-      )}
-      {selected !== null && (
-        <DetailModal
-          id={selected}
-          userAddr={address as `0x${string}` | undefined}
-          onClose={() => setSelected(null)}
-          onBuy={(h, d) => { setSelected(null); setSuccess({ type: 'bought', details: { ...d, txHash: h } }); refetch(); }}
-          onOffer={h => { setSelected(null); setSuccess({ type: 'offered', details: { txHash: h } }); refetch(); }}
-          onAccept={h => { setSelected(null); setSuccess({ type: 'accepted', details: { txHash: h } }); refetch(); }}
         />
       )}
       {success && <SuccessModal type={success.type} details={success.details} onClose={() => setSuccess(null)} />}
