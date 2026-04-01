@@ -1,12 +1,13 @@
 'use client';
 import './globals.css';
 import '@rainbow-me/rainbowkit/styles.css';
-import { WagmiProvider }        from 'wagmi';
+import { WagmiProvider } from 'wagmi';
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { wagmiConfig }          from '@/lib/wagmi';
-import { Toaster }              from 'react-hot-toast';
-import FloatingSupport          from '@/components/FloatingSupport';
+import { wagmiConfig } from '@/lib/wagmi';
+import { Toaster } from 'react-hot-toast';
+import FloatingSupport from '@/components/FloatingSupport';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const qc = new QueryClient();
 
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             >
               {children}
               <FloatingSupport />
+              <ThemeToggle />
               <Toaster
                 position="bottom-right"
                 toastOptions={{
