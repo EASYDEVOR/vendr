@@ -381,6 +381,19 @@ export default function PortfolioPage() {
   const [viewListId, setViewListId]= useState<bigint | null>(null);
   const [success,    setSuccess]   = useState<{ type: any; details?: any } | null>(null);
 
+
+  async function cancelOffer(offerId: bigint) {
+    if (!wc) return;
+    try {
+      toast.loading('Cancelling offer…');
+      // ignoreOffer used by seller; for buyer self-cancel there is no direct cancel
+      // We call ignoreOffer as a workaround — but buyer cannot call this
+      // Instead notify user that offers auto-return when listing is cancelled
+      toast.dismiss();
+      toast.error('Offers can only be cancelled by the seller ignoring them, or automatically when a listing is cancelled.');
+    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
+  }
+
   const activeL  = userListings.filter(l => l.active);
   const activeO  = userOffers.filter(o => o.active);
   const loading  = tokLoading || otcLoading;
@@ -607,6 +620,7 @@ export default function PortfolioPage() {
                     {o.offerToken === '0x0000000000000000000000000000000000000000' ? `${fmtETH(o.offerAmount)} ETH` : fmtToken(o.offerAmount, 6)}
                   </div>
                   <span className="badge badge-gold" style={{ marginTop: 5, display: 'inline-block' }}>PENDING</span>
+                  <div style={{ fontSize: 10, color: '#44445A', marginTop: 4 }}>Auto-returned if listing cancelled</div>
                 </div>
               </div>
             ))}
