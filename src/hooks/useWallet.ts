@@ -14,8 +14,16 @@ export interface WalletToken {
   color: string;
 }
 
-// Fetch ALL ERC-20 token transfers for this address using getLogs
-// then read balances for all unique token addresses found
+const ERC20_TRANSFER_EVENT = {
+  type: 'event' as const,
+  name: 'Transfer',
+  inputs: [
+    { type: 'address' as const, indexed: true,  name: 'from'  },
+    { type: 'address' as const, indexed: true,  name: 'to'    },
+    { type: 'uint256' as const, indexed: false, name: 'value' },
+  ],
+};
+
 export function useWalletTokens(userAddress: `0x${string}` | undefined) {
   const [tokens,  setTokens]  = useState<WalletToken[]>([]);
   const [ethBal,  setEthBal]  = useState<bigint>(BigInt(0));
@@ -32,74 +40,49 @@ export function useWalletTokens(userAddress: `0x${string}` | undefined) {
         setEthBal(b);
       } catch {}
 
-      // Find all ERC-20 tokens via Transfer event logs (to or from this wallet)
-      const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-      const paddedAddr = userAddress.toLowerCase().replace('0x', '0x000000000000000000000000');
-
+      // Collect all unique token addresses
       const uniqueAddrs = new Set<string>();
 
-      // Always include known tokens + USDT
+      // Always start with known tokens + USDT
       Object.keys(KNOWN_TOKENS).forEach(a => uniqueAddrs.add(a.toLowerCase()));
       uniqueAddrs.add(CONTRACTS.USDT.toLowerCase());
 
+      // Discover tokens via Transfer events (tokens received)
       try {
-        // Get logs where user is the recipient (TO)
         const logsTo = await publicClient.getLogs({
-          event: { type: 'event', name: 'Transfer', inputs: [{ type: 'address', indexed: true, name: 'from' }, { type: 'address', indexed: true, name: 'to' }, { type: 'uint256', indexed: false, name: 'value' }] },
+          event: ERC20_TRANSFER_EVENT,
           args: { to: userAddress },
           fromBlock: BigInt(0),
           toBlock: 'latest',
         });
         logsTo.forEach(log => { if (log.address) uniqueAddrs.add(log.address.toLowerCase()); });
-      } catch (e) {
-        // Fallback: try raw getLogs if typed version fails
-        try {
-          const logsTo = await publicClient.getLogs({
-            topics: [transferTopic, null, paddedAddr],
-            fromBlock: BigInt(0),
-            toBlock: 'latest',
-          });
-          logsTo.forEach(log => { if (log.address) uniqueAddrs.add(log.address.toLowerCase()); });
-        } catch {}
-      }
+      } catch {}
 
+      // Discover tokens via Transfer events (tokens sent)
       try {
-        // Get logs where user is the sender (FROM)
         const logsFrom = await publicClient.getLogs({
-          event: { type: 'event', name: 'Transfer', inputs: [{ type: 'address', indexed: true, name: 'from' }, { type: 'address', indexed: true, name: 'to' }, { type: 'uint256', indexed: false, name: 'value' }] },
+          event: ERC20_TRANSFER_EVENT,
           args: { from: userAddress },
           fromBlock: BigInt(0),
           toBlock: 'latest',
         });
         logsFrom.forEach(log => { if (log.address) uniqueAddrs.add(log.address.toLowerCase()); });
-      } catch (e) {
-        try {
-          const logsFrom = await publicClient.getLogs({
-            topics: [transferTopic, paddedAddr],
-            fromBlock: BigInt(0),
-            toBlock: 'latest',
-          });
-          logsFrom.forEach(log => { if (log.address) uniqueAddrs.add(log.address.toLowerCase()); });
-        } catch {}
-      }
+      } catch {}
 
-      // Now read balance + info for every unique token address
+      // Read balance + metadata for every discovered address
       const results: WalletToken[] = [];
-      const addrs = Array.from(uniqueAddrs) as `0x${string}`[];
-
-      await Promise.all(addrs.map(async (addr) => {
+      await Promise.all(Array.from(uniqueAddrs).map(async (addrLower) => {
+        const addr = addrLower as `0x${string}`;
         try {
-          const [bal] = await Promise.all([
-            publicClient.readContract({ address: addr, abi: ERC20_ABI, functionName: 'balanceOf', args: [userAddress] }),
-          ]);
-          if ((bal as bigint) === BigInt(0)) return; // skip zero balance
+          const bal = await publicClient.readContract({
+            address: addr, abi: ERC20_ABI, functionName: 'balanceOf', args: [userAddress],
+          }) as bigint;
+          if (bal === BigInt(0)) return;
 
-          const known = KNOWN_TOKENS[addr.toLowerCase()];
+          const known = KNOWN_TOKENS[addrLower];
           if (known) {
-            const [decimals] = await Promise.all([
-              publicClient.readContract({ address: addr, abi: ERC20_ABI, functionName: 'decimals' }),
-            ]);
-            results.push({ address: addr, name: known.name, symbol: known.symbol, decimals: Number(decimals), balance: bal as bigint, color: known.color });
+            const decimals = await publicClient.readContract({ address: addr, abi: ERC20_ABI, functionName: 'decimals' }) as number;
+            results.push({ address: addr, name: known.name, symbol: known.symbol, decimals: Number(decimals), balance: bal, color: known.color });
             return;
           }
 
@@ -110,22 +93,21 @@ export function useWalletTokens(userAddress: `0x${string}` | undefined) {
           ]);
           results.push({
             address: addr,
-            name: name as string,
-            symbol: symbol as string,
+            name:     name    as string,
+            symbol:   symbol  as string,
             decimals: Number(decimals),
-            balance: bal as bigint,
-            color: tokenColor(symbol as string),
+            balance:  bal,
+            color:    tokenColor(symbol as string),
           });
         } catch {}
       }));
 
-      // Sort: known tokens first, then by balance desc
       results.sort((a, b) => {
         const aKnown = !!KNOWN_TOKENS[a.address.toLowerCase()];
         const bKnown = !!KNOWN_TOKENS[b.address.toLowerCase()];
         if (aKnown && !bKnown) return -1;
         if (!aKnown && bKnown) return 1;
-        return Number(b.balance) - Number(a.balance);
+        return 0;
       });
 
       setTokens(results);
@@ -150,16 +132,8 @@ export function useTokenInfo(address: `0x${string}` | null) {
     const known = KNOWN_TOKENS[lower];
     if (known) {
       publicClient.readContract({ address, abi: ERC20_ABI, functionName: 'decimals' })
-        .then(d => {
-          const result = { ...known, decimals: Number(d) };
-          tokenInfoCache[lower] = result;
-          setInfo(result);
-        })
-        .catch(() => {
-          const result = { ...known, decimals: 18 };
-          tokenInfoCache[lower] = result;
-          setInfo(result);
-        });
+        .then(d => { const r = { ...known, decimals: Number(d) }; tokenInfoCache[lower] = r; setInfo(r); })
+        .catch(() => { const r = { ...known, decimals: 18 }; tokenInfoCache[lower] = r; setInfo(r); });
       return;
     }
 
@@ -168,12 +142,10 @@ export function useTokenInfo(address: `0x${string}` | null) {
       publicClient.readContract({ address, abi: ERC20_ABI, functionName: 'symbol' }),
       publicClient.readContract({ address, abi: ERC20_ABI, functionName: 'decimals' }),
     ]).then(([name, symbol, decimals]) => {
-      const result = { name: name as string, symbol: symbol as string, decimals: Number(decimals), color: tokenColor(symbol as string) };
-      tokenInfoCache[lower] = result;
-      setInfo(result);
-    }).catch(() => {
-      setInfo({ name: 'Unknown', symbol: '???', decimals: 18, color: '#888' });
-    });
+      const r = { name: name as string, symbol: symbol as string, decimals: Number(decimals), color: tokenColor(symbol as string) };
+      tokenInfoCache[lower] = r;
+      setInfo(r);
+    }).catch(() => setInfo({ name: 'Unknown', symbol: '???', decimals: 18, color: '#888' }));
   }, [address]);
 
   return info;
