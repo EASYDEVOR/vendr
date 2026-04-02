@@ -1,9 +1,11 @@
 'use client';
+
 import { useState, useEffect } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRouter } from 'next/navigation';
 import { parseEther, parseUnits } from 'viem';
 import toast from 'react-hot-toast';
+
 import Navbar from '@/components/Navbar';
 import LiveTicker from '@/components/LiveTicker';
 import BottomBar from '@/components/BottomBar';
@@ -11,11 +13,11 @@ import SuccessModal from '@/components/SuccessModal';
 import { publicClient } from '@/lib/client';
 import { useUserOTC, useOTCListing, OTCListing, OTCOffer } from '@/hooks/useOTC';
 import { useWalletTokens, useTokenInfo } from '@/hooks/useWallet';
-import { CONTRACTS, FEES, KNOWN_TOKENS } from '@/lib/constants';
+import { CONTRACTS, FEES } from '@/lib/constants';
 import { OTC_ABI, ERC20_ABI } from '@/abis';
 import { short, fmtETH, fmtToken, ago, fillLabel, addrLink, tokenColor } from '@/lib/utils';
 
-// ── Listing Detail Modal (reused from OTC page) ───────────────────────────────
+// ── Listing Detail Modal ───────────────────────────────
 function ListingDetailModal({ id, userAddr, onClose }: {
   id: bigint;
   userAddr: `0x${string}` | undefined;
@@ -39,7 +41,10 @@ function ListingDetailModal({ id, userAddr, onClose }: {
       toast.success('Offer accepted!');
       refetch();
       setSuccess({ type: 'accepted', details: { txHash: tx as `0x${string}` } });
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
+    } catch (e: any) { 
+      toast.dismiss(); 
+      toast.error(e?.shortMessage ?? 'Failed'); 
+    }
     setBusy(false);
   }
 
@@ -53,7 +58,10 @@ function ListingDetailModal({ id, userAddr, onClose }: {
       toast.dismiss();
       toast.success('Offer ignored — funds returned');
       refetch();
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
+    } catch (e: any) { 
+      toast.dismiss(); 
+      toast.error(e?.shortMessage ?? 'Failed'); 
+    }
     setBusy(false);
   }
 
@@ -70,6 +78,7 @@ function ListingDetailModal({ id, userAddr, onClose }: {
   const filled = l.totalAmount > 0n
     ? Number((l.totalAmount - l.remainingAmount) * 100n / l.totalAmount)
     : 0;
+
   const col = info ? tokenColor(info.symbol) : '#C8F000';
   const ZERO = '0x0000000000000000000000000000000000000000';
 
@@ -104,10 +113,10 @@ function ListingDetailModal({ id, userAddr, onClose }: {
         {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9, marginBottom: 14 }}>
           {[
-            { k: 'Total Listed',  v: fmtToken(l.totalAmount, info?.decimals ?? 18) },
-            { k: 'Remaining',     v: fmtToken(l.remainingAmount, info?.decimals ?? 18) },
-            { k: 'Price (100%)',  v: `${fmtETH(l.priceForFull)} ETH`, c: '#C8F000' },
-            { k: 'Offers',        v: l.offerCount.toString(), c: '#F5A623' },
+            { k: 'Total Listed', v: fmtToken(l.totalAmount, info?.decimals ?? 18) },
+            { k: 'Remaining', v: fmtToken(l.remainingAmount, info?.decimals ?? 18) },
+            { k: 'Price (100%)', v: `${fmtETH(l.priceForFull)} ETH`, c: '#C8F000' },
+            { k: 'Offers', v: l.offerCount.toString(), c: '#F5A623' },
           ].map(s => (
             <div key={s.k} style={{ background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 9, padding: 11, textAlign: 'center' }}>
               <div style={{ fontSize: 9, color: '#44445A', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4, fontFamily: 'Space Mono,monospace' }}>{s.k}</div>
@@ -125,11 +134,11 @@ function ListingDetailModal({ id, userAddr, onClose }: {
           <div className="bar"><div className="bar-fill" style={{ width: `${filled}%` }} /></div>
         </div>
 
-        {l.description ? (
+        {l.description && (
           <div style={{ padding: 12, background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 8, fontSize: 12, color: '#8888AA', lineHeight: 1.6, fontStyle: 'italic', marginBottom: 14 }}>
             "{l.description}"
           </div>
-        ) : null}
+        )}
 
         {/* Offers */}
         {offers.length > 0 ? (
@@ -185,38 +194,66 @@ function ListingDetailModal({ id, userAddr, onClose }: {
   );
 }
 
-// ── Quick List Modal ──────────────────────────────────────────────────────────
+// ── useTokenLookup Hook (Clean version) ───────────────────────────────
 function useTokenLookup(ca: string, userAddress?: string) {
-  const [info, setInfo] = useState<{ name:string; symbol:string; decimals:number; balance:bigint }|null>(null);
+  const [info, setInfo] = useState<{ name: string; symbol: string; decimals: number; balance: bigint } | null>(null);
   const [loading, setLoading] = useState(false);
+
   useEffect(() => {
-    if (!ca || !ca.startsWith('0x') || ca.length !== 42) { setInfo(null); return; }
-    setLoading(true);
-    const addr = ca.toLowerCase();
-    const known = KNOWN_TOKENS[addr];
-    const calls: Promise<any>[] = known
-      ? [Promise.resolve(known.name), Promise.resolve(known.symbol), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' })]
-      : [publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'name' }), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'symbol' }), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' })];
-    if (userAddress) calls.push(publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'balanceOf', args:[userAddress as `0x${string}`] }));
-    Promise.all(calls).then(([n,s,d,bal]) => setInfo({ name:n as string, symbol:s as string, decimals:Number(d), balance:(bal??BigInt(0)) as bigint })).catch(()=>setInfo(null)).finally(()=>setLoading(false));
+    if (!ca || !ca.startsWith('0x') || ca.length !== 42) {
+      setInfo(null);
+      return;
+    }
+
+    const fetchToken = async () => {
+      setLoading(true);
+      try {
+        const address = ca.toLowerCase() as `0x${string}`;
+
+        const [name, symbol, decimals, balance] = await Promise.all([
+          publicClient.readContract({ address, abi: ERC20_ABI, functionName: 'name' }),
+          publicClient.readContract({ address, abi: ERC20_ABI, functionName: 'symbol' }),
+          publicClient.readContract({ address, abi: ERC20_ABI, functionName: 'decimals' }),
+          userAddress 
+            ? publicClient.readContract({ address, abi: ERC20_ABI, functionName: 'balanceOf', args: [userAddress as `0x${string}`] })
+            : Promise.resolve(BigInt(0)),
+        ]);
+
+        setInfo({
+          name: name as string,
+          symbol: symbol as string,
+          decimals: Number(decimals),
+          balance: balance as bigint,
+        });
+      } catch (err) {
+        console.error("Failed to fetch token info:", err);
+        setInfo(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchToken();
   }, [ca, userAddress]);
+
   return { info, loading };
 }
 
+// ── Quick List Modal ──────────────────────────────────────────────────────────
 function QuickListModal({ token, onClose, onSuccess }: { token: any; onClose: () => void; onSuccess: (h: `0x${string}`) => void }) {
   const router = useRouter();
   const { data: wc } = useWalletClient();
-  const [price,   setPrice]   = useState('');
-  const [fill,    setFill]    = useState(0);
-  const [payMode, setPayMode] = useState(0); // 0=ETH 1=USDT 2=ETH+USDT
-  const [desc,    setDesc]    = useState('');
-  const [amt,     setAmt]     = useState('');
-  const [busy,    setBusy]    = useState(false);
+  const [price, setPrice] = useState('');
+  const [fill, setFill] = useState(0);
+  const [payMode, setPayMode] = useState(0);
+  const [desc, setDesc] = useState('');
+  const [amt, setAmt] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const PAY_MODES = [
-    { v:0, icon:'⟠', l:'ETH Only',   d:'Buyers must pay with ETH' },
-    { v:1, icon:'💵', l:'USDT Only',  d:'Buyers must pay with USDT' },
-    { v:2, icon:'💱', l:'ETH + USDT', d:'Buyer can choose ETH or USDT' },
+    { v: 0, icon: '⟠', l: 'ETH Only', d: 'Buyers must pay with ETH' },
+    { v: 1, icon: '💵', l: 'USDT Only', d: 'Buyers must pay with USDT' },
+    { v: 2, icon: '💱', l: 'ETH + USDT', d: 'Buyer can choose ETH or USDT' },
   ];
 
   async function submit() {
@@ -227,83 +264,120 @@ function QuickListModal({ token, onClose, onSuccess }: { token: any; onClose: ()
       const priceWei = parseEther(price);
       const acceptsAny = payMode === 2;
       const acceptedTokens: `0x${string}`[] = payMode === 1 ? [CONTRACTS.USDT] : [];
+
       toast.loading('Step 1/2 — Approving…');
-      const ap = await wc.writeContract({ address:token.address as `0x${string}`, abi:ERC20_ABI, functionName:'approve', args:[CONTRACTS.OTC, tokenAmt] });
-      await publicClient.waitForTransactionReceipt({ hash:ap as `0x${string}` });
-      toast.dismiss(); toast.loading('Step 2/2 — Listing…');
-      const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'listToken', args:[token.address as `0x${string}`, tokenAmt, priceWei, acceptedTokens, acceptsAny, fill, desc], value:FEES.LIST });
-      await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
-      toast.dismiss(); onSuccess(tx as `0x${string}`);
-    } catch(e:any){ toast.dismiss(); toast.error(e?.shortMessage??'Failed'); }
+      const ap = await wc.writeContract({ address: token.address as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.OTC, tokenAmt] });
+      await publicClient.waitForTransactionReceipt({ hash: ap as `0x${string}` });
+
+      toast.dismiss();
+      toast.loading('Step 2/2 — Listing…');
+      const tx = await wc.writeContract({ 
+        address: CONTRACTS.OTC, 
+        abi: OTC_ABI, 
+        functionName: 'listToken', 
+        args: [token.address as `0x${string}`, tokenAmt, priceWei, acceptedTokens, acceptsAny, fill, desc], 
+        value: FEES.LIST 
+      });
+      await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
+
+      toast.dismiss();
+      onSuccess(tx as `0x${string}`);
+    } catch (e: any) {
+      toast.dismiss();
+      toast.error(e?.shortMessage ?? 'Failed');
+    }
     setBusy(false);
   }
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">List {token.name}</div>
         <div className="modal-sub">Listing fee: 0.002 ETH · 2 transactions</div>
-        <div style={{ padding:'10px 14px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.14)', borderRadius:8, fontSize:12, marginBottom:16 }}>
-          Your balance: <strong style={{ color:'#C8F000' }}>{fmtToken(token.balance, token.decimals)} {token.symbol}</strong>
+
+        <div style={{ padding: '10px 14px', background: 'rgba(200,240,0,.06)', border: '1px solid rgba(200,240,0,.14)', borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
+          Your balance: <strong style={{ color: '#C8F000' }}>{fmtToken(token.balance, token.decimals)} {token.symbol}</strong>
         </div>
-        <div style={{ marginBottom:14 }}>
+
+        <div style={{ marginBottom: 14 }}>
           <label className="label">① Accepted Payment — choose first</label>
-          {PAY_MODES.map(o=>(
-            <div key={o.v} onClick={()=>setPayMode(o.v)} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 12px', marginBottom:7, borderRadius:7, cursor:'pointer', border:`1px solid ${payMode===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:payMode===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
-              <span style={{ fontSize:14 }}>{o.icon}</span>
-              <div style={{ flex:1 }}><div style={{ fontSize:12, fontWeight:700 }}>{o.l}</div><div style={{ fontSize:10, color:'#8888AA' }}>{o.d}</div></div>
-              {payMode===o.v && <span style={{ color:'#C8F000' }}>✓</span>}
+          {PAY_MODES.map(o => (
+            <div key={o.v} onClick={() => setPayMode(o.v)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', marginBottom: 7, borderRadius: 7, cursor: 'pointer', border: `1px solid ${payMode === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: payMode === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
+              <span style={{ fontSize: 14 }}>{o.icon}</span>
+              <div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 700 }}>{o.l}</div><div style={{ fontSize: 10, color: '#8888AA' }}>{o.d}</div></div>
+              {payMode === o.v && <span style={{ color: '#C8F000' }}>✓</span>}
             </div>
           ))}
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="label">② Amount to List *</label>
-            <input className="input" type="number" placeholder="e.g. 10000" value={amt} onChange={e=>setAmt(e.target.value)} />
+            <input className="input" type="number" placeholder="e.g. 10000" value={amt} onChange={e => setAmt(e.target.value)} />
           </div>
           <div>
-            <label className="label">{payMode===1 ? '③ Price for 100% (USDT) *' : '③ Price for 100% (ETH) *'}</label>
-            <div style={{ position:'relative' }}>
-              <input className="input" type="number" placeholder={payMode===1?'e.g. 2500':'e.g. 0.1'} value={price} onChange={e=>setPrice(e.target.value)} style={{ paddingRight:50 }} />
-              <span style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', fontSize:11, color:'#8888AA', fontFamily:'Space Mono,monospace', pointerEvents:'none' }}>{payMode===1?'USDT':'ETH'}</span>
+            <label className="label">{payMode === 1 ? '③ Price for 100% (USDT) *' : '③ Price for 100% (ETH) *'}</label>
+            <div style={{ position: 'relative' }}>
+              <input className="input" type="number" placeholder={payMode === 1 ? 'e.g. 2500' : 'e.g. 0.1'} value={price} onChange={e => setPrice(e.target.value)} style={{ paddingRight: 50 }} />
+              <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#8888AA', fontFamily: 'Space Mono,monospace', pointerEvents: 'none' }}>
+                {payMode === 1 ? 'USDT' : 'ETH'}
+              </span>
             </div>
           </div>
         </div>
-        {price && <div style={{ padding:'8px 12px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.15)', borderRadius:7, fontSize:11, color:'#C8F000', marginBottom:14 }}>50% = {(parseFloat(price||'0')/2).toFixed(payMode===1?2:5)} {payMode===1?'USDT':'ETH'} · 100% = {price} {payMode===1?'USDT':'ETH'}</div>}
-        <div style={{ marginBottom:14 }}>
+
+        {price && <div style={{ padding: '8px 12px', background: 'rgba(200,240,0,.06)', border: '1px solid rgba(200,240,0,.15)', borderRadius: 7, fontSize: 11, color: '#C8F000', marginBottom: 14 }}>
+          50% = {(parseFloat(price || '0') / 2).toFixed(payMode === 1 ? 2 : 5)} {payMode === 1 ? 'USDT' : 'ETH'} · 100% = {price} {payMode === 1 ? 'USDT' : 'ETH'}
+        </div>}
+
+        <div style={{ marginBottom: 14 }}>
           <label className="label">④ Fill Terms</label>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-            {[{v:0,l:'50% or 100%'},{v:1,l:'100% only'}].map(o=>(
-              <div key={o.v} onClick={()=>setFill(o.v)} style={{ padding:'9px 12px', borderRadius:7, cursor:'pointer', textAlign:'center', fontWeight:700, fontSize:12, border:`1px solid ${fill===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:fill===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>{o.l}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {[{ v: 0, l: '50% or 100%' }, { v: 1, l: '100% only' }].map(o => (
+              <div key={o.v} onClick={() => setFill(o.v)} style={{ padding: '9px 12px', borderRadius: 7, cursor: 'pointer', textAlign: 'center', fontWeight: 700, fontSize: 12, border: `1px solid ${fill === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: fill === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>{o.l}</div>
             ))}
           </div>
         </div>
-        <div style={{ marginBottom:16 }}><label className="label">Description (optional)</label><textarea className="input" rows={2} value={desc} onChange={e=>setDesc(e.target.value)} style={{ resize:'vertical' }} placeholder="Tell buyers about this token…" /></div>
-        <button className="btn btn-lime" style={{ width:'100%', padding:'12px 0', fontSize:14 }} disabled={busy||!price||!amt||!tokenInfo} onClick={submit}>
-          {busy ? <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}><span className="spinner spinner-black"/>Processing…</span> : 'Approve & List Token'}
+
+        <div style={{ marginBottom: 16 }}>
+          <label className="label">Description (optional)</label>
+          <textarea className="input" rows={2} value={desc} onChange={e => setDesc(e.target.value)} style={{ resize: 'vertical' }} placeholder="Tell buyers about this token…" />
+        </div>
+
+        <button 
+          className="btn btn-lime" 
+          style={{ width: '100%', padding: '12px 0', fontSize: 14 }} 
+          disabled={busy || !price || !amt} 
+          onClick={submit}
+        >
+          {busy ? (
+            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <span className="spinner spinner-black" />Processing…
+            </span>
+          ) : 'Approve & List Token'}
         </button>
       </div>
     </div>
   );
 }
 
+// ── Edit Modal ───────────────────────────────────────────────────────────────
 function EditModal({ listing, onClose, onSuccess }: { listing: OTCListing; onClose: () => void; onSuccess: () => void }) {
   const router = useRouter();
   const { data: wc } = useWalletClient();
   const info = useTokenInfo(listing.tokenAddress);
   const [price, setPrice] = useState(fmtETH(listing.priceForFull, 6));
-  const [fill,  setFill]  = useState(listing.fillTerms);
-  // Detect current payMode from listing
+  const [fill, setFill] = useState(listing.fillTerms);
   const initPayMode = listing.acceptsAnyToken ? 2 : listing.acceptedTokens && listing.acceptedTokens.length > 0 ? 1 : 0;
   const [payMode, setPayMode] = useState(initPayMode);
-  const [desc,  setDesc]  = useState(listing.description);
-  const [busy,  setBusy]  = useState(false);
+  const [desc, setDesc] = useState(listing.description);
+  const [busy, setBusy] = useState(false);
 
   const PAY_MODES = [
-    { v:0, icon:'⟠', l:'ETH Only',   d:'Buyers must pay with ETH' },
-    { v:1, icon:'💵', l:'USDT Only',  d:'Buyers must pay with USDT' },
-    { v:2, icon:'💱', l:'ETH + USDT', d:'Buyer can choose ETH or USDT' },
+    { v: 0, icon: '⟠', l: 'ETH Only', d: 'Buyers must pay with ETH' },
+    { v: 1, icon: '💵', l: 'USDT Only', d: 'Buyers must pay with USDT' },
+    { v: 2, icon: '💱', l: 'ETH + USDT', d: 'Buyer can choose ETH or USDT' },
   ];
 
   async function submit() {
@@ -313,56 +387,79 @@ function EditModal({ listing, onClose, onSuccess }: { listing: OTCListing; onClo
       const priceWei = parseEther(price);
       const acceptsAny = payMode === 2;
       const acceptedTokens: `0x${string}`[] = payMode === 1 ? [CONTRACTS.USDT] : [];
+
       toast.loading('Editing listing…');
-      const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'editListing', args:[listing.id, priceWei, acceptedTokens, acceptsAny, fill, desc], value:FEES.EDIT });
-      await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
-      toast.dismiss(); toast.success('Listing updated!'); onSuccess();
-    } catch(e:any){ toast.dismiss(); toast.error(e?.shortMessage??'Failed'); }
+      const tx = await wc.writeContract({ 
+        address: CONTRACTS.OTC, 
+        abi: OTC_ABI, 
+        functionName: 'editListing', 
+        args: [listing.id, priceWei, acceptedTokens, acceptsAny, fill, desc], 
+        value: FEES.EDIT 
+      });
+      await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
+      toast.dismiss(); 
+      toast.success('Listing updated!'); 
+      onSuccess();
+    } catch (e: any) { 
+      toast.dismiss(); 
+      toast.error(e?.shortMessage ?? 'Failed'); 
+    }
     setBusy(false);
   }
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">Edit Listing #{listing.id.toString()}</div>
         <div className="modal-sub">Edit fee: 0.001 ETH · Cannot change token or amount</div>
-        <div style={{ padding:'9px 12px', background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.07)', borderRadius:8, fontSize:12, color:'#8888AA', marginBottom:16 }}>
-          Token: <strong style={{ color:'#fff' }}>{info?.name??short(listing.tokenAddress)}</strong>
-          &nbsp;· Remaining: <strong style={{ color:'#C8F000' }}>{fmtToken(listing.remainingAmount,info?.decimals??18)} {info?.symbol}</strong>
+
+        <div style={{ padding: '9px 12px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 8, fontSize: 12, color: '#8888AA', marginBottom: 16 }}>
+          Token: <strong style={{ color: '#fff' }}>{info?.name ?? short(listing.tokenAddress)}</strong>
+          &nbsp;· Remaining: <strong style={{ color: '#C8F000' }}>{fmtToken(listing.remainingAmount, info?.decimals ?? 18)} {info?.symbol}</strong>
         </div>
-        <div style={{ marginBottom:14 }}>
+
+        <div style={{ marginBottom: 14 }}>
           <label className="label">New Price for 100% (ETH)</label>
-          <input className="input" type="number" value={price} onChange={e=>setPrice(e.target.value)} />
+          <input className="input" type="number" value={price} onChange={e => setPrice(e.target.value)} />
         </div>
-        {price && <div style={{ padding:'8px 12px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.14)', borderRadius:7, fontSize:11, color:'#C8F000', marginBottom:14 }}>50% = {(parseFloat(price||'0')/2).toFixed(5)} ETH · 100% = {price} ETH</div>}
-        <div style={{ marginBottom:14 }}>
+
+        {price && <div style={{ padding: '8px 12px', background: 'rgba(200,240,0,.06)', border: '1px solid rgba(200,240,0,.14)', borderRadius: 7, fontSize: 11, color: '#C8F000', marginBottom: 14 }}>
+          50% = {(parseFloat(price || '0') / 2).toFixed(5)} ETH · 100% = {price} ETH
+        </div>}
+
+        <div style={{ marginBottom: 14 }}>
           <label className="label">Fill Terms</label>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-            {[{v:0,l:'50% or 100%'},{v:1,l:'100% only'}].map(o=>(
-              <div key={o.v} onClick={()=>setFill(o.v)} style={{ padding:'9px 12px', borderRadius:7, cursor:'pointer', textAlign:'center', fontWeight:700, fontSize:12, border:`1px solid ${fill===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:fill===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>{o.l}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {[{ v: 0, l: '50% or 100%' }, { v: 1, l: '100% only' }].map(o => (
+              <div key={o.v} onClick={() => setFill(o.v)} style={{ padding: '9px 12px', borderRadius: 7, cursor: 'pointer', textAlign: 'center', fontWeight: 700, fontSize: 12, border: `1px solid ${fill === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: fill === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>{o.l}</div>
             ))}
           </div>
         </div>
-        <div style={{ marginBottom:14 }}>
+
+        <div style={{ marginBottom: 14 }}>
           <label className="label">Accepted Payment</label>
-          {PAY_MODES.map(o=>(
-            <div key={o.v} onClick={()=>setPayMode(o.v)} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 12px', marginBottom:7, borderRadius:7, cursor:'pointer', border:`1px solid ${payMode===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:payMode===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
-              <span style={{ fontSize:14 }}>{o.icon}</span>
-              <div style={{ flex:1 }}><div style={{ fontSize:12, fontWeight:700 }}>{o.l}</div><div style={{ fontSize:10, color:'#8888AA' }}>{o.d}</div></div>
-              {payMode===o.v && <span style={{ color:'#C8F000' }}>✓</span>}
+          {PAY_MODES.map(o => (
+            <div key={o.v} onClick={() => setPayMode(o.v)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', marginBottom: 7, borderRadius: 7, cursor: 'pointer', border: `1px solid ${payMode === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: payMode === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
+              <span style={{ fontSize: 14 }}>{o.icon}</span>
+              <div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 700 }}>{o.l}</div><div style={{ fontSize: 10, color: '#8888AA' }}>{o.d}</div></div>
+              {payMode === o.v && <span style={{ color: '#C8F000' }}>✓</span>}
             </div>
           ))}
         </div>
-        <div style={{ marginBottom:16 }}><label className="label">Description</label><textarea className="input" rows={2} value={desc} onChange={e=>setDesc(e.target.value)} style={{ resize:'vertical' }} /></div>
-        <button className="btn btn-lime" style={{ width:'100%', padding:'12px 0', fontSize:14 }} disabled={busy||!price} onClick={submit}>
-          {busy ? <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}><span className="spinner spinner-black"/>Updating…</span> : 'Save Changes — 0.001 ETH'}
+
+        <div style={{ marginBottom: 16 }}>
+          <label className="label">Description</label>
+          <textarea className="input" rows={2} value={desc} onChange={e => setDesc(e.target.value)} style={{ resize: 'vertical' }} />
+        </div>
+
+        <button className="btn btn-lime" style={{ width: '100%', padding: '12px 0', fontSize: 14 }} disabled={busy || !price} onClick={submit}>
+          {busy ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><span className="spinner spinner-black" />Updating…</span> : 'Save Changes — 0.001 ETH'}
         </button>
       </div>
     </div>
   );
 }
-
 
 // ── Main Portfolio Page ───────────────────────────────────────────────────────
 export default function PortfolioPage() {
@@ -370,32 +467,18 @@ export default function PortfolioPage() {
   const router = useRouter();
   const { data: wc } = useWalletClient();
   const addr = address as `0x${string}` | undefined;
-
   const { tokens, ethBal, loading: tokLoading } = useWalletTokens(addr);
   const { userListings, userOffers, loading: otcLoading } = useUserOTC(addr);
 
-  const [tab,        setTab]       = useState<'tokens' | 'listings' | 'offers' | 'activity'>('tokens');
-  const [listToken,  setListToken] = useState<any>(null);
-  const [editL,      setEditL]     = useState<OTCListing | null>(null);
-  const [viewListId, setViewListId]= useState<bigint | null>(null);
-  const [success,    setSuccess]   = useState<{ type: any; details?: any } | null>(null);
+  const [tab, setTab] = useState<'tokens' | 'listings' | 'offers' | 'activity'>('tokens');
+  const [listToken, setListToken] = useState<any>(null);
+  const [editL, setEditL] = useState<OTCListing | null>(null);
+  const [viewListId, setViewListId] = useState<bigint | null>(null);
+  const [success, setSuccess] = useState<{ type: any; details?: any } | null>(null);
 
-
-  async function cancelOffer(offerId: bigint) {
-    if (!wc) return;
-    try {
-      toast.loading('Cancelling offer…');
-      // ignoreOffer used by seller; for buyer self-cancel there is no direct cancel
-      // We call ignoreOffer as a workaround — but buyer cannot call this
-      // Instead notify user that offers auto-return when listing is cancelled
-      toast.dismiss();
-      toast.error('Offers can only be cancelled by the seller ignoring them, or automatically when a listing is cancelled.');
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
-  }
-
-  const activeL  = userListings.filter(l => l.active);
-  const activeO  = userOffers.filter(o => o.active);
-  const loading  = tokLoading || otcLoading;
+  const activeL = userListings.filter(l => l.active);
+  const activeO = userOffers.filter(o => o.active);
+  const loading = tokLoading || otcLoading;
 
   async function cancel(id: bigint) {
     if (!wc) return;
@@ -405,7 +488,10 @@ export default function PortfolioPage() {
       await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
       toast.dismiss();
       setSuccess({ type: 'cancelled', details: { txHash: tx as `0x${string}` } });
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
+    } catch (e: any) { 
+      toast.dismiss(); 
+      toast.error(e?.shortMessage ?? 'Failed'); 
+    }
   }
 
   if (!isConnected) {
@@ -427,7 +513,6 @@ export default function PortfolioPage() {
       <Navbar /><LiveTicker />
 
       <div style={{ padding: '20px 20px 0', flex: 1 }}>
-
         {/* Wallet card */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', background: '#0F0F1C', border: '1px solid rgba(200,240,0,.14)', borderRadius: 12, marginBottom: 16 }}>
           <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(200,240,0,.08)', border: '2px solid rgba(200,240,0,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>👤</div>
@@ -449,11 +534,11 @@ export default function PortfolioPage() {
         {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 16 }}>
           {[
-            { l: 'ETH Balance',     v: `${fmtETH(ethBal, 4)} ETH`,    c: '#C8F000' },
-            { l: 'Tokens',          v: tokens.length.toString(),         c: '#fff' },
-            { l: 'Active Listings', v: activeL.length.toString(),        c: '#F5A623' },
-            { l: 'Active Offers',   v: activeO.length.toString(),        c: '#F5A623' },
-            { l: 'Total Listings',  v: userListings.length.toString(),   c: '#00C805' },
+            { l: 'ETH Balance', v: `${fmtETH(ethBal, 4)} ETH`, c: '#C8F000' },
+            { l: 'Tokens', v: tokens.length.toString(), c: '#fff' },
+            { l: 'Active Listings', v: activeL.length.toString(), c: '#F5A623' },
+            { l: 'Active Offers', v: activeO.length.toString(), c: '#F5A623' },
+            { l: 'Total Listings', v: userListings.length.toString(), c: '#00C805' },
           ].map(s => (
             <div key={s.l} style={{ background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 9, padding: '12px 14px', textAlign: 'center' }}>
               <div style={{ fontSize: 9, color: '#44445A', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4, fontFamily: 'Space Mono,monospace' }}>{s.l}</div>
@@ -465,9 +550,9 @@ export default function PortfolioPage() {
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
           {([
-            { id: 'tokens',   l: `Tokens (${tokens.length + 1})` },
+            { id: 'tokens', l: `Tokens (${tokens.length + 1})` },
             { id: 'listings', l: `Listings (${activeL.length})` },
-            { id: 'offers',   l: `Offers (${activeO.length})` },
+            { id: 'offers', l: `Offers (${activeO.length})` },
             { id: 'activity', l: 'Activity' },
           ] as const).map(t => (
             <button key={t.id} className={`sub-tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
@@ -482,10 +567,10 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {/* ── TOKENS ── */}
+        {/* TOKENS TAB */}
         {!loading && tab === 'tokens' && (
           <div>
-            {/* ETH */}
+            {/* ETH Card */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 10, marginBottom: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(98,126,234,.1)', border: '1px solid rgba(98,126,234,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⟠</div>
@@ -504,9 +589,7 @@ export default function PortfolioPage() {
               </div>
             ) : tokens.map(t => (
               <div key={t.address}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 10, marginBottom: 8, cursor: 'pointer', transition: 'border-color .2s' }}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(200,240,0,.25)')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(255,255,255,.07)')}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 10, marginBottom: 8, cursor: 'pointer' }}
                 onClick={() => setListToken(t)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 36, height: 36, borderRadius: '50%', background: t.color + '20', border: '1px solid ' + t.color + '40', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900, fontFamily: 'Space Mono,monospace', color: t.color, flexShrink: 0 }}>
@@ -531,21 +614,20 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {/* ── LISTINGS ── */}
+        {/* LISTINGS TAB */}
         {!loading && tab === 'listings' && (
           <div>
             {activeL.length === 0 ? (
               <div className="empty">
                 <div className="empty-icon">📋</div>
                 <div className="empty-title">No active listings</div>
-                <div className="empty-desc">Go to Token OTC to list, or click any token in the Tokens tab.</div>
-                <a href="/otc"><button className="btn btn-lime" style={{ marginTop: 18, padding: '10px 22px', fontSize: 13 }}>Go to Token OTC</button></a>
+                <div className="empty-desc">Go to Token OTC to list your tokens.</div>
+                <a href="/otc"><button className="btn btn-lime" style={{ marginTop: 18, padding: '10px 22px', fontSize: 13 }}>Go to OTC Market</button></a>
               </div>
             ) : activeL.map(l => {
               const filled = l.totalAmount > 0n ? Number((l.totalAmount - l.remainingAmount) * 100n / l.totalAmount) : 0;
               return (
                 <div key={l.id.toString()} style={{ padding: '14px 16px', background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 10, marginBottom: 10 }}>
-                  {/* Clickable top section opens detail modal */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', marginBottom: 10 }}
                     onClick={() => router.push(`/listing/${l.id.toString()}`)}>
                     <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(200,240,0,.08)', border: '1px solid rgba(200,240,0,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🪙</div>
@@ -569,23 +651,18 @@ export default function PortfolioPage() {
                     </div>
                   </div>
 
-                  {/* Fill bar */}
                   <div className="bar" style={{ marginBottom: 10 }}>
                     <div className="bar-fill" style={{ width: `${filled}%` }} />
                   </div>
 
-                  {/* Action buttons */}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn btn-ghost" style={{ flex: 1, padding: '7px 0', fontSize: 12 }}
-                      onClick={() => router.push(`/listing/${l.id.toString()}`)}>
+                    <button className="btn btn-ghost" style={{ flex: 1, padding: '7px 0', fontSize: 12 }} onClick={() => router.push(`/listing/${l.id.toString()}`)}>
                       👁 View Offers
                     </button>
-                    <button className="btn btn-ghost" style={{ flex: 1, padding: '7px 0', fontSize: 12 }}
-                      onClick={() => setEditL(l)}>
+                    <button className="btn btn-ghost" style={{ flex: 1, padding: '7px 0', fontSize: 12 }} onClick={() => setEditL(l)}>
                       ✏️ Edit
                     </button>
-                    <button className="btn btn-danger" style={{ flex: 1, padding: '7px 0', fontSize: 12 }}
-                      onClick={() => cancel(l.id)}>
+                    <button className="btn btn-danger" style={{ flex: 1, padding: '7px 0', fontSize: 12 }} onClick={() => cancel(l.id)}>
                       ✕ Cancel
                     </button>
                   </div>
@@ -595,7 +672,7 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {/* ── OFFERS ── */}
+        {/* OFFERS TAB */}
         {!loading && tab === 'offers' && (
           <div>
             {activeO.length === 0 ? (
@@ -618,24 +695,14 @@ export default function PortfolioPage() {
                   <div style={{ fontFamily: 'Space Mono,monospace', fontSize: 13, fontWeight: 700, color: '#C8F000' }}>
                     {o.offerToken === '0x0000000000000000000000000000000000000000' ? `${fmtETH(o.offerAmount)} ETH` : fmtToken(o.offerAmount, 6)}
                   </div>
-                  <span className="badge badge-gold" style={{ marginTop:5, display:'inline-block' }}>PENDING</span>
-                </div>
-                <div style={{ display:'flex', flexDirection:'column', gap:4, flexShrink:0 }}>
-                  <button
-                    onClick={() => {
-                      toast('Offers are automatically returned to you if the seller cancels the listing, or when the seller ignores your offer.', { icon: 'ℹ️', duration: 5000 });
-                    }}
-                    style={{ padding:'5px 10px', background:'rgba(255,68,68,.08)', border:'1px solid rgba(255,68,68,.2)', borderRadius:6, color:'#FF7777', fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:'DM Sans,sans-serif', whiteSpace:'nowrap' }}>
-                    ℹ️ Cancel?
-                  </button>
-                  <div style={{ fontSize:9, color:'#44445A', textAlign:'center', maxWidth:72, lineHeight:1.3 }}>Auto-refunded if listing cancelled</div>
+                  <span className="badge badge-gold" style={{ marginTop: 5, display: 'inline-block' }}>PENDING</span>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {/* ── ACTIVITY ── */}
+        {/* ACTIVITY TAB */}
         {!loading && tab === 'activity' && (
           <div>
             {userListings.length === 0 && userOffers.length === 0 ? (
@@ -683,10 +750,10 @@ export default function PortfolioPage() {
       <div style={{ height: 24 }} />
       <BottomBar />
 
-      {listToken   && <QuickListModal token={listToken} onClose={() => setListToken(null)} onSuccess={h => { setListToken(null); setSuccess({ type: 'listed', details: { txHash: h } }); }} />}
-      {editL       && <EditModal listing={editL} onClose={() => setEditL(null)} onSuccess={() => setEditL(null)} />}
-      {viewListId  !== null && <ListingDetailModal id={viewListId} userAddr={addr} onClose={() => setViewListId(null)} />}
-      {success     && <SuccessModal type={success.type} details={success.details} onClose={() => setSuccess(null)} />}
+      {listToken && <QuickListModal token={listToken} onClose={() => setListToken(null)} onSuccess={h => { setListToken(null); setSuccess({ type: 'listed', details: { txHash: h } }); }} />}
+      {editL && <EditModal listing={editL} onClose={() => setEditL(null)} onSuccess={() => setEditL(null)} />}
+      {viewListId !== null && <ListingDetailModal id={viewListId} userAddr={addr} onClose={() => setViewListId(null)} />}
+      {success && <SuccessModal type={success.type} details={success.details} onClose={() => setSuccess(null)} />}
     </div>
   );
 }
