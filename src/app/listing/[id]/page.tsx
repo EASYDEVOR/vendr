@@ -2,7 +2,7 @@
 import { use, useState, useEffect } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRouter } from 'next/navigation';
-import { parseEther, parseUnits } from 'viem';
+import { parseEther, parseUnits, formatEther } from 'viem';
 import toast from 'react-hot-toast';
 import Navbar from '@/components/Navbar';
 import BottomBar from '@/components/BottomBar';
@@ -12,22 +12,24 @@ import { useOTCListing, OTCOffer } from '@/hooks/useOTC';
 import { useTokenInfo } from '@/hooks/useWallet';
 import { CONTRACTS, FEES, KNOWN_TOKENS } from '@/lib/constants';
 import { OTC_ABI, ERC20_ABI } from '@/abis';
-import { short, fmtETH, fmtToken, ago, fillLabel, addrLink, tweetUrl } from '@/lib/utils';
+import { short, fmtETH, fmtToken, ago, fillLabel, addrLink, tweetUrl, tokenColor } from '@/lib/utils';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 
 function VerifiedBadge() {
-  return <span title="Verified" style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, borderRadius:'50%', background:'#1DA1F2', color:'#fff', fontSize:8, fontWeight:900, marginLeft:3 }}>✓</span>;
+  return (
+    <span title="Verified" style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, borderRadius:'50%', background:'#1DA1F2', color:'#fff', fontSize:8, fontWeight:900, marginLeft:3 }}>✓</span>
+  );
 }
 
-// Resolve what payment the seller accepts from listing data
+// Determine seller's accepted payment from listing data
 function resolvePayMode(l: { acceptsAnyToken: boolean; acceptedTokens: readonly string[] }): 'eth' | 'usdt' | 'both' {
   if (l.acceptsAnyToken) return 'both';
   if (l.acceptedTokens && l.acceptedTokens.length > 0) return 'usdt';
   return 'eth';
 }
 
-// Auto-lookup hook
+// Auto-lookup token info hook
 function useTokenLookup(ca: string, userAddress?: string) {
   const [info, setInfo] = useState<{ name:string; symbol:string; decimals:number; balance:bigint }|null>(null);
   const [loading, setLoading] = useState(false);
@@ -37,12 +39,38 @@ function useTokenLookup(ca: string, userAddress?: string) {
     const addr = ca.toLowerCase();
     const known = KNOWN_TOKENS[addr];
     const calls: Promise<any>[] = known
-      ? [Promise.resolve(known.name), Promise.resolve(known.symbol), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' })]
-      : [publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'name' }), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'symbol' }), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' })];
-    if (userAddress) calls.push(publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'balanceOf', args:[userAddress as `0x${string}`] }));
-    Promise.all(calls).then(([n,s,d,bal]) => setInfo({ name:n as string, symbol:s as string, decimals:Number(d), balance:(bal??BigInt(0)) as bigint })).catch(()=>setInfo(null)).finally(()=>setLoading(false));
+      ? [Promise.resolve(known.name), Promise.resolve(known.symbol),
+         publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' })]
+      : [publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'name' }),
+         publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'symbol' }),
+         publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' })];
+    if (userAddress) {
+      calls.push(publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'balanceOf', args:[userAddress as `0x${string}`] }));
+    }
+    Promise.all(calls)
+      .then(([n,s,d,bal]) => setInfo({ name:n as string, symbol:s as string, decimals:Number(d), balance:(bal??BigInt(0)) as bigint }))
+      .catch(() => setInfo(null))
+      .finally(() => setLoading(false));
   }, [ca, userAddress]);
   return { info, loading };
+}
+
+// Live ETH/USD price hook
+function useETHPrice() {
+  const [price, setPrice] = useState<number | null>(null);
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const r = await window.fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+        const d = await r.json();
+        setPrice(d.ethereum.usd);
+      } catch {}
+    };
+    fetch();
+    const t = setInterval(fetch, 30000);
+    return () => clearInterval(t);
+  }, []);
+  return price;
 }
 
 export default function ListingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -51,6 +79,7 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
   const { address } = useAccount();
   const { data: wc } = useWalletClient();
   const router = useRouter();
+  const ethPrice = useETHPrice();
 
   const { listing:l, offers, loading, refetch } = useOTCListing(listingId);
   const info = useTokenInfo(l?.tokenAddress ?? null);
@@ -58,6 +87,7 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
 
   const [tab, setTab] = useState<'buy'|'offer'>('buy');
   const [buyHalf, setBuyHalf] = useState(false);
+  // buyer's chosen payment currency — default to what seller allows
   const [buyPayWith, setBuyPayWith] = useState<'eth'|'usdt'>('eth');
 
   // Offer state
@@ -76,13 +106,13 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
   const isSeller = l?.seller?.toLowerCase() === address?.toLowerCase();
   const filled = l && l.totalAmount > 0n ? Number((l.totalAmount - l.remainingAmount)*100n/l.totalAmount) : 0;
   const pageUrl = typeof window !== 'undefined' ? window.location.href : `https://vendr-pi.vercel.app/listing/${id}`;
+  const verified = l ? !!KNOWN_TOKENS[l.tokenAddress.toLowerCase()]?.verified : false;
 
-  // Set default payment based on what seller accepts
+  // When listing loads, set default payment to what seller accepts
   useEffect(() => {
     if (!l) return;
     const mode = resolvePayMode(l);
-    if (mode === 'usdt') setBuyPayWith('usdt');
-    else setBuyPayWith('eth');
+    setBuyPayWith(mode === 'usdt' ? 'usdt' : 'eth');
   }, [l]);
 
   useEffect(() => {
@@ -90,34 +120,45 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
     Promise.all([
       publicClient.getBalance({ address: address as `0x${string}` }),
       publicClient.readContract({ address:CONTRACTS.USDT, abi:ERC20_ABI, functionName:'balanceOf', args:[address as `0x${string}`] }),
-    ]).then(([eth, usdt]) => { setUserETHBal(eth as bigint); setUserUSDTBal(usdt as bigint); }).catch(()=>{});
+    ]).then(([eth, usdt]) => {
+      setUserETHBal(eth as bigint);
+      setUserUSDTBal(usdt as bigint);
+    }).catch(() => {});
   }, [address]);
+
+  // Compute how much buyer pays
+  // Listing price is always stored in ETH (wei). For USDT payment, convert using live price.
+  const priceWei = l ? (buyHalf ? l.pricePerHalf : l.priceForFull) : BigInt(0);
+  const priceETH = parseFloat(formatEther(priceWei));
+  const priceUSD = ethPrice ? priceETH * ethPrice : null;
+  // USDT amount in 6-decimal units
+  const priceUSDT = priceUSD ? Math.round(priceUSD * 1_000_000) : null;
 
   async function doBuy() {
     if (!wc || !l) return;
     setBusy(true);
     try {
       if (buyPayWith === 'eth') {
-        const price = buyHalf ? l.pricePerHalf : l.priceForFull;
-        toast.loading('Processing purchase…');
-        const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'buyWithETH', args:[l.id, buyHalf], value:price+FEES.BUY });
+        toast.loading('Processing ETH purchase…');
+        const tx = await wc.writeContract({
+          address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'buyWithETH',
+          args:[l.id, buyHalf], value:priceWei + FEES.BUY,
+        });
         await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
         toast.dismiss();
         setSuccess({ type:'bought', details:{ txHash:tx as `0x${string}`, amount:fmtToken(buyHalf?l.totalAmount/2n:l.remainingAmount, info?.decimals??18), token:info?.symbol }});
       } else {
-        // USDT payment — seller set USDT price; use priceForFull as USDT amount (6 decimals)
-        // Convert ETH price to rough USDT equivalent, but seller should set their USDT price
-        // We pass the price as-is scaled to USDT decimals
-        const priceETHWei = buyHalf ? l.pricePerHalf : l.priceForFull;
-        // USDT amount = price in ETH * 1e6 / 1e18 ... but seller listed an ETH price
-        // so we use the ETH price as the USDT amount directly scaled
-        const usdtAmt = (priceETHWei * BigInt(1_000_000)) / BigInt(10 ** 18);
+        // USDT payment
+        if (!priceUSDT) { toast.error('Cannot get USDT price — try ETH'); setBusy(false); return; }
+        const usdtAmt = BigInt(priceUSDT);
         toast.loading('Step 1/2 — Approving USDT…');
         const ap = await wc.writeContract({ address:CONTRACTS.USDT, abi:ERC20_ABI, functionName:'approve', args:[CONTRACTS.OTC, usdtAmt] });
         await publicClient.waitForTransactionReceipt({ hash:ap as `0x${string}` });
-        toast.dismiss();
-        toast.loading('Step 2/2 — Buying with USDT…');
-        const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'buyWithToken', args:[l.id, buyHalf, CONTRACTS.USDT, usdtAmt], value:FEES.BUY });
+        toast.dismiss(); toast.loading('Step 2/2 — Buying with USDT…');
+        const tx = await wc.writeContract({
+          address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'buyWithToken',
+          args:[l.id, buyHalf, CONTRACTS.USDT, usdtAmt], value:FEES.BUY,
+        });
         await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
         toast.dismiss();
         setSuccess({ type:'bought', details:{ txHash:tx as `0x${string}`, amount:fmtToken(buyHalf?l.totalAmount/2n:l.remainingAmount, info?.decimals??18), token:info?.symbol }});
@@ -131,22 +172,24 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
     if (!wc || !l || !oAmt) return;
     setBusy(true);
     try {
-      if (oTok==='eth') {
+      if (oTok === 'eth') {
         const wei = parseEther(oAmt);
         toast.loading('Submitting ETH offer…');
         const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'makeOfferWithETH', args:[l.id, oHalf, oMsg], value:wei+FEES.OFFER });
         await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
-        toast.dismiss(); setSuccess({ type:'offered', details:{ txHash:tx as `0x${string}` }});
-      } else if (oTok==='usdt') {
+        toast.dismiss();
+        setSuccess({ type:'offered', details:{ txHash:tx as `0x${string}` }});
+      } else if (oTok === 'usdt') {
         const amt = parseUnits(oAmt, 6);
         toast.loading('Step 1/2 — Approving USDT…');
         const ap = await wc.writeContract({ address:CONTRACTS.USDT, abi:ERC20_ABI, functionName:'approve', args:[CONTRACTS.OTC, amt] });
         await publicClient.waitForTransactionReceipt({ hash:ap as `0x${string}` });
         toast.dismiss(); toast.loading('Step 2/2 — Submitting offer…');
         const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'makeOfferWithToken', args:[l.id, oHalf, CONTRACTS.USDT, amt, oMsg], value:FEES.OFFER });
-        await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` }); toast.dismiss();
+        await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
+        toast.dismiss();
         setSuccess({ type:'offered', details:{ txHash:tx as `0x${string}` }});
-      } else if (oTok==='other' && oCAInfo) {
+      } else if (oTok === 'other' && oCAInfo) {
         const amt = parseUnits(oAmt, oCAInfo.decimals);
         const addr = oCA as `0x${string}`;
         toast.loading('Step 1/2 — Approving token…');
@@ -154,7 +197,8 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
         await publicClient.waitForTransactionReceipt({ hash:ap as `0x${string}` });
         toast.dismiss(); toast.loading('Step 2/2 — Submitting offer…');
         const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'makeOfferWithToken', args:[l.id, oHalf, addr, amt, oMsg], value:FEES.OFFER });
-        await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` }); toast.dismiss();
+        await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
+        toast.dismiss();
         setSuccess({ type:'offered', details:{ txHash:tx as `0x${string}` }});
       }
       refetch();
@@ -168,7 +212,8 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
       toast.loading('Accepting offer…');
       const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'acceptOffer', args:[offerId] });
       await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
-      toast.dismiss(); toast.success('Offer accepted!'); refetch();
+      toast.dismiss(); toast.success('Offer accepted!');
+      refetch();
       setSuccess({ type:'accepted', details:{ txHash:tx as `0x${string}` }});
     } catch(e:any){ toast.dismiss(); toast.error(e?.shortMessage??'Failed'); }
     setBusy(false);
@@ -197,8 +242,12 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
     </div>
   );
 
-  const verified = !!KNOWN_TOKENS[l.tokenAddress.toLowerCase()]?.verified;
   const tweetMsg = `🔥 Token OTC listing on VENDR Market!\n\n📦 ${info?.name??'Token'} (${info?.symbol??''})\n💰 ${fmtETH(l.priceForFull)} ETH for ${fmtToken(l.remainingAmount,info?.decimals??18)} ${info?.symbol??''}\n🔗 ${pageUrl}\n\n#VENDR #RobinhoodChain #OTC`;
+
+  // Price display string based on payment mode and buyer's choice
+  const priceDisplay = buyPayWith === 'usdt' && priceUSD
+    ? `$${priceUSD.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })} USDT`
+    : `${fmtETH(priceWei)} ETH`;
 
   return (
     <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', background:'#08080F' }}>
@@ -211,19 +260,18 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 380px', gap:20 }}>
 
-          {/* LEFT */}
+          {/* ── LEFT ── */}
           <div>
-            {/* Header card */}
             <div style={{ background:'#0F0F1C', border:'1px solid rgba(255,255,255,.07)', borderRadius:14, padding:24, marginBottom:16 }}>
               <div style={{ display:'flex', alignItems:'flex-start', gap:16, marginBottom:18 }}>
                 <div style={{ width:60, height:60, borderRadius:'50%', background:'rgba(200,240,0,.1)', border:'2px solid rgba(200,240,0,.25)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:900, fontFamily:'Space Mono,monospace', color:'#C8F000', flexShrink:0 }}>
-                  {info?.symbol?.slice(0,2)?? '??'}
+                  {info?.symbol?.slice(0,2)??'??'}
                 </div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:26, fontWeight:800, marginBottom:4, display:'flex', alignItems:'center', gap:4 }}>
+                  <div style={{ fontSize:26, fontWeight:800, marginBottom:4, display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
                     {info?.name??'Unknown Token'}
                     {verified && <VerifiedBadge />}
-                    <span style={{ color:'#8888AA', fontSize:16, fontWeight:400, marginLeft:6 }}>{info?.symbol}</span>
+                    <span style={{ color:'#8888AA', fontSize:16, fontWeight:400, marginLeft:4 }}>{info?.symbol}</span>
                   </div>
                   <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                     <span style={{ fontFamily:'Space Mono,monospace', fontSize:10, color:'#44445A' }}>{l.tokenAddress}</span>
@@ -240,13 +288,13 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
                 <span className={`badge ${l.fillTerms===0?'badge-green':'badge-lime'}`}>{fillLabel(l.fillTerms)}</span>
                 <span className="badge badge-lime">{pm==='eth'?'ETH Only':pm==='usdt'?'USDT Only':'ETH + USDT'}</span>
                 <span className="badge badge-gold">#{l.id.toString()}</span>
-                {verified && <span className="badge" style={{ background:'rgba(29,161,242,.1)', color:'#1DA1F2', border:'1px solid rgba(29,161,242,.25)' }}>✓ Verified Token</span>}
+                {verified && <span className="badge" style={{ background:'rgba(29,161,242,.1)', color:'#1DA1F2', border:'1px solid rgba(29,161,242,.25)' }}>✓ Verified</span>}
               </div>
 
               <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10, marginBottom:16 }}>
                 {[
-                  { k:'Total Listed', v:fmtToken(l.totalAmount,info?.decimals??18) },
-                  { k:'Remaining',    v:fmtToken(l.remainingAmount,info?.decimals??18) },
+                  { k:'Total Listed', v:fmtToken(l.totalAmount, info?.decimals??18) },
+                  { k:'Remaining',    v:fmtToken(l.remainingAmount, info?.decimals??18) },
                   { k:'Price (100%)', v:`${fmtETH(l.priceForFull)} ETH`, c:'#C8F000' },
                   { k:'Offers',       v:l.offerCount.toString(), c:'#F5A623' },
                 ].map(s=>(
@@ -271,7 +319,6 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
                 </div>
               )}
 
-              {/* Shareable link */}
               <div style={{ marginTop:14, display:'flex', alignItems:'center', gap:8, padding:'9px 12px', background:'rgba(200,240,0,.05)', border:'1px solid rgba(200,240,0,.12)', borderRadius:8 }}>
                 <span style={{ fontSize:11, color:'#8888AA', flex:1, fontFamily:'Space Mono,monospace', wordBreak:'break-all' }}>{pageUrl}</span>
                 <button onClick={()=>{ navigator.clipboard?.writeText(pageUrl); toast.success('Link copied!'); }}
@@ -312,12 +359,11 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
                     </div>
                   </div>
                   <div style={{ fontFamily:'Space Mono,monospace', fontSize:14, fontWeight:700, color:'#C8F000', marginRight:isSeller?12:0 }}>
-                    {o.offerToken===ZERO?`${fmtETH(o.offerAmount)} ETH`:fmtToken(o.offerAmount,6)}
+                    {o.offerToken===ZERO ? `${fmtETH(o.offerAmount)} ETH` : fmtToken(o.offerAmount,6)}
                   </div>
-                  {/* ONLY Accept — no Ignore */}
                   {isSeller && (
                     <button disabled={busy} onClick={()=>doAccept(o.id)}
-                      style={{ padding:'6px 16px', background:'#00C805', border:'none', borderRadius:6, color:'#000', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                      style={{ padding:'6px 16px', background:'#00C805', border:'none', borderRadius:6, color:'#000', fontSize:12, fontWeight:700, cursor:'pointer', opacity:busy?0.5:1 }}>
                       Accept
                     </button>
                   )}
@@ -326,7 +372,7 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
 
-          {/* RIGHT — Buy / Offer panel */}
+          {/* ── RIGHT panel ── */}
           {!isSeller ? (
             <div>
               <div style={{ background:'#0F0F1C', border:'1px solid rgba(255,255,255,.07)', borderRadius:14, padding:20, position:'sticky', top:80 }}>
@@ -338,6 +384,7 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
                   ))}
                 </div>
 
+                {/* ── BUY TAB ── */}
                 {tab==='buy' && (
                   <div>
                     {/* Fill selector */}
@@ -345,86 +392,136 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
                       <div>
                         <label className="label">Fill Amount</label>
                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14 }}>
-                          {[{v:false,label:'100%',amt:l.remainingAmount,p:l.priceForFull},{v:true,label:'50%',amt:l.totalAmount/2n,p:l.pricePerHalf}].map(o=>(
-                            <div key={String(o.v)} onClick={()=>setBuyHalf(o.v)} style={{ padding:12, cursor:'pointer', borderRadius:8, textAlign:'center', border:`1px solid ${buyHalf===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:buyHalf===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
-                              <div style={{ fontSize:14, fontWeight:800 }}>{o.label}</div>
-                              <div style={{ fontSize:11, color:'#8888AA', marginTop:2 }}>{fmtToken(o.amt,info?.decimals??18)} {info?.symbol}</div>
-                              <div style={{ fontSize:13, fontWeight:700, color:'#C8F000', marginTop:4 }}>{fmtETH(o.p)} ETH</div>
-                            </div>
-                          ))}
+                          {[
+                            { v:false, label:'100%', amt:l.remainingAmount, pWei:l.priceForFull },
+                            { v:true,  label:'50%',  amt:l.totalAmount/2n,  pWei:l.pricePerHalf },
+                          ].map(o=>{
+                            const pEth = parseFloat(formatEther(o.pWei));
+                            const pUsd = ethPrice ? pEth * ethPrice : null;
+                            return (
+                              <div key={String(o.v)} onClick={()=>setBuyHalf(o.v)} style={{ padding:12, cursor:'pointer', borderRadius:8, textAlign:'center', border:`1px solid ${buyHalf===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:buyHalf===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
+                                <div style={{ fontSize:14, fontWeight:800 }}>{o.label}</div>
+                                <div style={{ fontSize:11, color:'#8888AA', marginTop:2 }}>{fmtToken(o.amt,info?.decimals??18)} {info?.symbol}</div>
+                                <div style={{ fontSize:13, fontWeight:700, color:'#C8F000', marginTop:4 }}>{fmtETH(o.pWei)} ETH</div>
+                                {pUsd && <div style={{ fontSize:10, color:'#8888AA', marginTop:1 }}>≈ ${pUsd.toLocaleString('en-US',{maximumFractionDigits:2})} USDT</div>}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
 
-                    {/* Payment method — strictly based on what seller chose */}
+                    {/* Payment method — based strictly on seller's choice */}
                     <div style={{ marginBottom:14 }}>
                       <label className="label">Pay With</label>
                       {pm==='eth' && (
-                        <div style={{ padding:'10px 12px', background:'rgba(200,240,0,.07)', border:'1px solid rgba(200,240,0,.2)', borderRadius:8, display:'flex', alignItems:'center', gap:8 }}>
-                          <span style={{ fontSize:18 }}>⟠</span>
-                          <div>
-                            <div style={{ fontSize:12, fontWeight:700 }}>ETH Only</div>
-                            <div style={{ fontSize:10, color:'#8888AA' }}>Bal: {fmtETH(userETHBal,4)} ETH</div>
+                        <div style={{ padding:'12px 14px', background:'rgba(200,240,0,.07)', border:'1px solid rgba(200,240,0,.2)', borderRadius:8, display:'flex', alignItems:'center', gap:10 }}>
+                          <span style={{ fontSize:20 }}>⟠</span>
+                          <div style={{ flex:1 }}>
+                            <div style={{ fontSize:13, fontWeight:700 }}>ETH Only</div>
+                            <div style={{ fontSize:11, color:'#8888AA' }}>Your balance: {fmtETH(userETHBal,4)} ETH</div>
                           </div>
-                          <div style={{ marginLeft:'auto', color:'#C8F000', fontSize:14 }}>✓</div>
+                          <span style={{ color:'#C8F000', fontSize:16 }}>✓</span>
                         </div>
                       )}
                       {pm==='usdt' && (
-                        <div style={{ padding:'10px 12px', background:'rgba(200,240,0,.07)', border:'1px solid rgba(200,240,0,.2)', borderRadius:8, display:'flex', alignItems:'center', gap:8 }}>
-                          <span style={{ fontSize:18 }}>💵</span>
-                          <div>
-                            <div style={{ fontSize:12, fontWeight:700 }}>USDT Only</div>
-                            <div style={{ fontSize:10, color:'#8888AA' }}>Bal: {(Number(userUSDTBal)/1_000_000).toFixed(2)} USDT</div>
+                        <div style={{ padding:'12px 14px', background:'rgba(200,240,0,.07)', border:'1px solid rgba(200,240,0,.2)', borderRadius:8, display:'flex', alignItems:'center', gap:10 }}>
+                          <span style={{ fontSize:20 }}>💵</span>
+                          <div style={{ flex:1 }}>
+                            <div style={{ fontSize:13, fontWeight:700 }}>USDT Only</div>
+                            <div style={{ fontSize:11, color:'#8888AA' }}>Your balance: {(Number(userUSDTBal)/1_000_000).toFixed(2)} USDT</div>
                           </div>
-                          <div style={{ marginLeft:'auto', color:'#C8F000', fontSize:14 }}>✓</div>
+                          <span style={{ color:'#C8F000', fontSize:16 }}>✓</span>
                         </div>
                       )}
                       {pm==='both' && (
                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-                          {[{v:'eth' as const,icon:'⟠',l:'ETH',bal:`${fmtETH(userETHBal,4)} ETH`},{v:'usdt' as const,icon:'💵',l:'USDT',bal:`${(Number(userUSDTBal)/1_000_000).toFixed(2)} USDT`}].map(o=>(
-                            <div key={o.v} onClick={()=>setBuyPayWith(o.v)} style={{ padding:'10px 12px', cursor:'pointer', borderRadius:8, textAlign:'center', border:`1px solid ${buyPayWith===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:buyPayWith===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
-                              <div style={{ fontSize:18, marginBottom:2 }}>{o.icon}</div>
+                          {[
+                            { v:'eth' as const,  icon:'⟠', l:'ETH',  bal:`${fmtETH(userETHBal,4)} ETH` },
+                            { v:'usdt' as const, icon:'💵', l:'USDT', bal:`${(Number(userUSDTBal)/1_000_000).toFixed(2)} USDT` },
+                          ].map(o=>(
+                            <div key={o.v} onClick={()=>setBuyPayWith(o.v)} style={{ padding:'11px 12px', cursor:'pointer', borderRadius:8, textAlign:'center', border:`1px solid ${buyPayWith===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:buyPayWith===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
+                              <div style={{ fontSize:20, marginBottom:3 }}>{o.icon}</div>
                               <div style={{ fontSize:12, fontWeight:700 }}>{o.l}</div>
-                              <div style={{ fontSize:10, color:'#8888AA', marginTop:1 }}>{o.bal}</div>
+                              <div style={{ fontSize:10, color:'#8888AA', marginTop:2 }}>{o.bal}</div>
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
 
-                    {/* Summary */}
+                    {/* Price summary — shows ETH or live USDT equivalent */}
                     <div style={{ padding:'12px 14px', background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.07)', borderRadius:8, marginBottom:14 }}>
-                      {[
-                        { k:'You receive', v:`${fmtToken(buyHalf?l.totalAmount/2n:l.remainingAmount,info?.decimals??18)} ${info?.symbol??''}` },
-                        { k:'Token price',  v:`${fmtETH(buyHalf?l.pricePerHalf:l.priceForFull)} ETH` },
-                        { k:'Protocol fee', v:'0.002 ETH' },
-                        { k:'Total',        v:`${fmtETH((buyHalf?l.pricePerHalf:l.priceForFull)+FEES.BUY)} ETH`, bold:true, c:'#C8F000' },
-                      ].map(r=>(
-                        <div key={r.k} style={{ display:'flex', justifyContent:'space-between', padding:'4px 0', fontSize:12, borderTop:r.bold?'1px solid rgba(255,255,255,.07)':'none', marginTop:r.bold?4:0, paddingTop:r.bold?8:4 }}>
-                          <span style={{ color:r.bold?'#fff':'#8888AA', fontWeight:r.bold?700:400 }}>{r.k}</span>
-                          <span style={{ fontFamily:'Space Mono,monospace', fontWeight:r.bold?700:600, color:r.c??'#fff', fontSize:r.bold?13:11 }}>{r.v}</span>
+                      <div style={{ display:'flex', justifyContent:'space-between', padding:'4px 0', fontSize:12 }}>
+                        <span style={{ color:'#8888AA' }}>You receive</span>
+                        <span style={{ fontFamily:'Space Mono,monospace', fontSize:11, color:'#fff' }}>
+                          {fmtToken(buyHalf?l.totalAmount/2n:l.remainingAmount, info?.decimals??18)} {info?.symbol??''}
+                        </span>
+                      </div>
+                      <div style={{ display:'flex', justifyContent:'space-between', padding:'4px 0', fontSize:12 }}>
+                        <span style={{ color:'#8888AA' }}>Token price</span>
+                        <span style={{ fontFamily:'Space Mono,monospace', fontSize:11, color:'#fff' }}>
+                          {fmtETH(priceWei)} ETH
+                          {priceUSD && <span style={{ color:'#8888AA', marginLeft:6 }}>≈ ${priceUSD.toLocaleString('en-US',{maximumFractionDigits:2})}</span>}
+                        </span>
+                      </div>
+                      {buyPayWith==='usdt' && priceUSD && (
+                        <div style={{ display:'flex', justifyContent:'space-between', padding:'4px 0', fontSize:12 }}>
+                          <span style={{ color:'#8888AA' }}>Live ETH price</span>
+                          <span style={{ fontFamily:'Space Mono,monospace', fontSize:11, color:'#F5A623' }}>${ethPrice?.toLocaleString('en-US',{maximumFractionDigits:2})} / ETH</span>
                         </div>
-                      ))}
+                      )}
+                      <div style={{ display:'flex', justifyContent:'space-between', padding:'4px 0', fontSize:12 }}>
+                        <span style={{ color:'#8888AA' }}>Protocol fee</span>
+                        <span style={{ fontFamily:'Space Mono,monospace', fontSize:11, color:'#fff' }}>0.002 ETH</span>
+                      </div>
+                      <div style={{ borderTop:'1px solid rgba(255,255,255,.07)', marginTop:4, paddingTop:8, display:'flex', justifyContent:'space-between' }}>
+                        <span style={{ fontWeight:700 }}>You pay</span>
+                        <div style={{ textAlign:'right' }}>
+                          {buyPayWith==='usdt' && priceUSD ? (
+                            <>
+                              <div style={{ fontFamily:'Space Mono,monospace', fontSize:14, fontWeight:700, color:'#C8F000' }}>
+                                ${priceUSD.toLocaleString('en-US',{maximumFractionDigits:2})} USDT
+                              </div>
+                              <div style={{ fontFamily:'Space Mono,monospace', fontSize:10, color:'#8888AA' }}>+ {fmtETH(FEES.BUY)} ETH fee</div>
+                            </>
+                          ) : (
+                            <div style={{ fontFamily:'Space Mono,monospace', fontSize:14, fontWeight:700, color:'#C8F000' }}>
+                              {fmtETH(priceWei + FEES.BUY)} ETH
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
-                    <button className="btn btn-lime" style={{ width:'100%', padding:'13px 0', fontSize:14 }} disabled={busy} onClick={doBuy}>
-                      {busy ? <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}><span className="spinner spinner-black"/>Processing…</span>
-                        : `Buy Now — ${fmtETH((buyHalf?l.pricePerHalf:l.priceForFull)+FEES.BUY)} ETH`}
+                    {buyPayWith==='usdt' && !priceUSD && (
+                      <div style={{ padding:'8px 12px', background:'rgba(255,68,68,.07)', border:'1px solid rgba(255,68,68,.2)', borderRadius:7, fontSize:11, color:'#FF4444', marginBottom:14 }}>
+                        ⚠️ Could not fetch live ETH price. Please try again or pay with ETH.
+                      </div>
+                    )}
+
+                    <button className="btn btn-lime" style={{ width:'100%', padding:'13px 0', fontSize:14 }} disabled={busy||(buyPayWith==='usdt'&&!priceUSDT)} onClick={doBuy}>
+                      {busy
+                        ? <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}><span className="spinner spinner-black"/>Processing…</span>
+                        : buyPayWith==='usdt' && priceUSD
+                          ? `Buy Now — $${priceUSD.toLocaleString('en-US',{maximumFractionDigits:2})} USDT`
+                          : `Buy Now — ${fmtETH(priceWei+FEES.BUY)} ETH`}
                     </button>
                   </div>
                 )}
 
+                {/* ── OFFER TAB ── */}
                 {tab==='offer' && (
                   <div>
                     <div style={{ padding:'9px 12px', background:'rgba(245,166,35,.07)', border:'1px solid rgba(245,166,35,.2)', borderRadius:7, fontSize:11, color:'#F5A623', marginBottom:14 }}>
-                      ⚠️ Offer fee 0.001 ETH (non-refundable). Verify values before offering unknown tokens.
+                      ⚠️ Offer fee 0.001 ETH (non-refundable).
                     </div>
 
                     <label className="label">Offer With</label>
                     {[
-                      {v:'eth',  icon:'⟠', l:'ETH',        d:`Bal: ${fmtETH(userETHBal,4)} ETH`},
-                      {v:'usdt', icon:'💵', l:'USDT',       d:`Bal: ${(Number(userUSDTBal)/1_000_000).toFixed(2)} USDT`},
-                      {v:'other',icon:'🪙', l:'Other Token', d:'Paste CA below — auto-looked up'},
+                      { v:'eth',   icon:'⟠', l:'ETH',         d:`Bal: ${fmtETH(userETHBal,4)} ETH` },
+                      { v:'usdt',  icon:'💵', l:'USDT',        d:`Bal: ${(Number(userUSDTBal)/1_000_000).toFixed(2)} USDT` },
+                      { v:'other', icon:'🪙', l:'Other Token',  d:'Paste CA — auto-looks up instantly' },
                     ].map(o=>(
                       <div key={o.v} onClick={()=>setOTok(o.v as any)} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 12px', marginBottom:7, borderRadius:8, cursor:'pointer', border:`1px solid ${oTok===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:oTok===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
                         <span style={{ fontSize:16 }}>{o.icon}</span>
@@ -437,11 +534,13 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
 
                     {oTok==='other' && (
                       <div style={{ marginBottom:12 }}>
-                        <input className="input" placeholder="Token CA 0x… (auto-looks up)" value={oCA} onChange={e=>setOCA(e.target.value)} />
+                        <input className="input" placeholder="Token CA 0x…" value={oCA} onChange={e=>setOCA(e.target.value)} />
                         {oCALoading && <div style={{ fontSize:11, color:'#8888AA', marginTop:4 }}>Looking up…</div>}
                         {oCAInfo && !oCALoading && (
                           <div style={{ marginTop:6, padding:'8px 10px', background:oCAInfo.balance>0n?'rgba(0,200,5,.07)':'rgba(255,68,68,.07)', border:`1px solid ${oCAInfo.balance>0n?'rgba(0,200,5,.2)':'rgba(255,68,68,.2)'}`, borderRadius:6, fontSize:11, color:oCAInfo.balance>0n?'#00C805':'#FF4444' }}>
-                            {oCAInfo.balance>0n ? `✓ ${oCAInfo.name} (${oCAInfo.symbol}) — Bal: ${fmtToken(oCAInfo.balance,oCAInfo.decimals)} ${oCAInfo.symbol}` : `⚠️ ${oCAInfo.name} — You have 0 of this token`}
+                            {oCAInfo.balance>0n
+                              ? `✓ ${oCAInfo.name} (${oCAInfo.symbol}) — Bal: ${fmtToken(oCAInfo.balance,oCAInfo.decimals)} ${oCAInfo.symbol}`
+                              : `⚠️ ${oCAInfo.name} — You have 0 of this token`}
                           </div>
                         )}
                         {oCA.length===42 && !oCAInfo && !oCALoading && <div style={{ fontSize:11, color:'#FF4444', marginTop:4 }}>Token not found</div>}
@@ -467,7 +566,8 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
                     <button className="btn btn-lime" style={{ width:'100%', padding:'12px 0', fontSize:14 }}
                       disabled={busy||!oAmt||(oTok==='other'&&!oCAInfo)}
                       onClick={doOffer}>
-                      {busy ? <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}><span className="spinner spinner-black"/>Processing…</span>
+                      {busy
+                        ? <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}><span className="spinner spinner-black"/>Processing…</span>
                         : 'Submit Offer — 0.001 ETH Fee'}
                     </button>
                   </div>
@@ -478,7 +578,7 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
             <div style={{ background:'#0F0F1C', border:'1px solid rgba(200,240,0,.14)', borderRadius:14, padding:20, height:'fit-content', position:'sticky', top:80 }}>
               <div style={{ fontSize:14, fontWeight:700, marginBottom:12 }}>Your Listing</div>
               <div style={{ fontSize:13, color:'#8888AA', lineHeight:1.7, marginBottom:16 }}>
-                Accept offers above. Go to Portfolio to edit price, change payment terms or cancel this listing.
+                Accept offers above. Go to Portfolio to edit price, payment terms or cancel.
               </div>
               <button className="btn btn-lime" style={{ width:'100%', padding:'10px 0', fontSize:13 }} onClick={()=>router.push('/portfolio')}>
                 Manage in Portfolio →
@@ -487,7 +587,6 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
           )}
         </div>
       </div>
-
       <BottomBar />
       {success && <SuccessModal type={success.type} details={success.details} onClose={()=>setSuccess(null)} />}
     </div>
