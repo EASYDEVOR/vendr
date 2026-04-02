@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
+import { useRouter } from 'next/navigation';
 import { parseEther, parseUnits } from 'viem';
 import toast from 'react-hot-toast';
 import Navbar from '@/components/Navbar';
@@ -22,6 +23,7 @@ function ListingDetailModal({ id, userAddr, onClose }: {
 }) {
   const { listing: l, offers, loading, refetch } = useOTCListing(id);
   const info = useTokenInfo(l?.tokenAddress ?? null);
+  const router = useRouter();
   const { data: wc } = useWalletClient();
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState<{ type: any; details?: any } | null>(null);
@@ -184,14 +186,38 @@ function ListingDetailModal({ id, userAddr, onClose }: {
 }
 
 // ── Quick List Modal ──────────────────────────────────────────────────────────
+function useTokenLookup(ca: string, userAddress?: string) {
+  const [info, setInfo] = useState<{ name:string; symbol:string; decimals:number; balance:bigint }|null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!ca || !ca.startsWith('0x') || ca.length !== 42) { setInfo(null); return; }
+    setLoading(true);
+    const addr = ca.toLowerCase();
+    const known = KNOWN_TOKENS[addr];
+    const calls: Promise<any>[] = known
+      ? [Promise.resolve(known.name), Promise.resolve(known.symbol), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' })]
+      : [publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'name' }), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'symbol' }), publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' })];
+    if (userAddress) calls.push(publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'balanceOf', args:[userAddress as `0x${string}`] }));
+    Promise.all(calls).then(([n,s,d,bal]) => setInfo({ name:n as string, symbol:s as string, decimals:Number(d), balance:(bal??BigInt(0)) as bigint })).catch(()=>setInfo(null)).finally(()=>setLoading(false));
+  }, [ca, userAddress]);
+  return { info, loading };
+}
+
 function QuickListModal({ token, onClose, onSuccess }: { token: any; onClose: () => void; onSuccess: (h: `0x${string}`) => void }) {
+  const router = useRouter();
   const { data: wc } = useWalletClient();
-  const [price,  setPrice]  = useState('');
-  const [fill,   setFill]   = useState(0);
-  const [anyTok, setAnyTok] = useState(false);
-  const [desc,   setDesc]   = useState('');
-  const [amt,    setAmt]    = useState('');
-  const [busy,   setBusy]   = useState(false);
+  const [price,   setPrice]   = useState('');
+  const [fill,    setFill]    = useState(0);
+  const [payMode, setPayMode] = useState(0); // 0=ETH 1=USDT 2=ETH+USDT
+  const [desc,    setDesc]    = useState('');
+  const [amt,     setAmt]     = useState('');
+  const [busy,    setBusy]    = useState(false);
+
+  const PAY_MODES = [
+    { v:0, icon:'⟠', l:'ETH Only',   d:'Buyers must pay with ETH' },
+    { v:1, icon:'💵', l:'USDT Only',  d:'Buyers must pay with USDT' },
+    { v:2, icon:'💱', l:'ETH + USDT', d:'Buyer can choose ETH or USDT' },
+  ];
 
   async function submit() {
     if (!wc || !price || !amt) return;
@@ -199,176 +225,140 @@ function QuickListModal({ token, onClose, onSuccess }: { token: any; onClose: ()
     try {
       const tokenAmt = parseUnits(amt, token.decimals);
       const priceWei = parseEther(price);
+      const acceptsAny = payMode === 2;
+      const acceptedTokens: `0x${string}`[] = payMode === 1 ? [CONTRACTS.USDT] : [];
       toast.loading('Step 1/2 — Approving…');
-      const ap = await wc.writeContract({ address: token.address as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.OTC, tokenAmt] });
-      await publicClient.waitForTransactionReceipt({ hash: ap as `0x${string}` });
-      toast.dismiss();
-      toast.loading('Step 2/2 — Listing…');
-      const tx = await wc.writeContract({
-        address: CONTRACTS.OTC, abi: OTC_ABI, functionName: 'listToken',
-        args: [token.address as `0x${string}`, tokenAmt, priceWei, [], anyTok, fill, desc],
-        value: FEES.LIST,
-      });
-      await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
-      toast.dismiss();
-      onSuccess(tx as `0x${string}`);
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
+      const ap = await wc.writeContract({ address:token.address as `0x${string}`, abi:ERC20_ABI, functionName:'approve', args:[CONTRACTS.OTC, tokenAmt] });
+      await publicClient.waitForTransactionReceipt({ hash:ap as `0x${string}` });
+      toast.dismiss(); toast.loading('Step 2/2 — Listing…');
+      const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'listToken', args:[token.address as `0x${string}`, tokenAmt, priceWei, acceptedTokens, acceptsAny, fill, desc], value:FEES.LIST });
+      await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
+      toast.dismiss(); onSuccess(tx as `0x${string}`);
+    } catch(e:any){ toast.dismiss(); toast.error(e?.shortMessage??'Failed'); }
     setBusy(false);
   }
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">List {token.name}</div>
         <div className="modal-sub">Listing fee: 0.002 ETH · 2 transactions</div>
-
-        <div style={{ padding: '10px 14px', background: 'rgba(200,240,0,.06)', border: '1px solid rgba(200,240,0,.14)', borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
-          Your balance: <strong style={{ color: '#C8F000' }}>{fmtToken(token.balance, token.decimals)} {token.symbol}</strong>
+        <div style={{ padding:'10px 14px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.14)', borderRadius:8, fontSize:12, marginBottom:16 }}>
+          Your balance: <strong style={{ color:'#C8F000' }}>{fmtToken(token.balance, token.decimals)} {token.symbol}</strong>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-          <div>
-            <label className="label">Amount to List *</label>
-            <input className="input" type="number" placeholder="e.g. 10000" value={amt} onChange={e => setAmt(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Price for 100% (ETH) *</label>
-            <input className="input" type="number" placeholder="e.g. 0.1" value={price} onChange={e => setPrice(e.target.value)} />
-          </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+          <div><label className="label">Amount to List *</label><input className="input" type="number" placeholder="e.g. 10000" value={amt} onChange={e=>setAmt(e.target.value)} /></div>
+          <div><label className="label">Price for 100% (ETH) *</label><input className="input" type="number" placeholder="e.g. 0.1" value={price} onChange={e=>setPrice(e.target.value)} /></div>
         </div>
-
-        {price && fill === 0 && (
-          <div style={{ padding: '8px 12px', background: 'rgba(200,240,0,.06)', border: '1px solid rgba(200,240,0,.15)', borderRadius: 7, fontSize: 11, color: '#C8F000', marginBottom: 14 }}>
-            50% = {(parseFloat(price) / 2).toFixed(5)} ETH · 100% = {price} ETH
-          </div>
-        )}
-
-        <div style={{ marginBottom: 14 }}>
+        {price && fill===0 && <div style={{ padding:'8px 12px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.15)', borderRadius:7, fontSize:11, color:'#C8F000', marginBottom:14 }}>50% = {(parseFloat(price)/2).toFixed(5)} ETH · 100% = {price} ETH</div>}
+        <div style={{ marginBottom:14 }}>
           <label className="label">Fill Terms</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[{ v: 0, l: '50% or 100%' }, { v: 1, l: '100% only' }].map(o => (
-              <div key={o.v} onClick={() => setFill(o.v)} style={{ padding: '9px 12px', borderRadius: 7, cursor: 'pointer', textAlign: 'center', fontWeight: 700, fontSize: 12, border: `1px solid ${fill === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: fill === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
-                {o.l}
-              </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+            {[{v:0,l:'50% or 100%'},{v:1,l:'100% only'}].map(o=>(
+              <div key={o.v} onClick={()=>setFill(o.v)} style={{ padding:'9px 12px', borderRadius:7, cursor:'pointer', textAlign:'center', fontWeight:700, fontSize:12, border:`1px solid ${fill===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:fill===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>{o.l}</div>
             ))}
           </div>
         </div>
-
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom:14 }}>
           <label className="label">Accepted Payment</label>
-          {[{ v: false, l: 'ETH + USDT' }, { v: true, l: 'Any token (⚠️ verify values)' }].map(o => (
-            <div key={String(o.v)} onClick={() => setAnyTok(o.v)} style={{ padding: '9px 12px', marginBottom: 7, borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 600, border: `1px solid ${anyTok === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: anyTok === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
-              {o.l}
+          {PAY_MODES.map(o=>(
+            <div key={o.v} onClick={()=>setPayMode(o.v)} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 12px', marginBottom:7, borderRadius:7, cursor:'pointer', border:`1px solid ${payMode===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:payMode===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
+              <span style={{ fontSize:14 }}>{o.icon}</span>
+              <div style={{ flex:1 }}><div style={{ fontSize:12, fontWeight:700 }}>{o.l}</div><div style={{ fontSize:10, color:'#8888AA' }}>{o.d}</div></div>
+              {payMode===o.v && <span style={{ color:'#C8F000' }}>✓</span>}
             </div>
           ))}
         </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <label className="label">Description (optional)</label>
-          <textarea className="input" rows={2} value={desc} onChange={e => setDesc(e.target.value)} style={{ resize: 'vertical' }} placeholder="Tell buyers about this token…" />
-        </div>
-
-        <button className="btn btn-lime" style={{ width: '100%', padding: '12px 0', fontSize: 14 }} disabled={busy || !price || !amt} onClick={submit}>
-          {busy
-            ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><span className="spinner spinner-black" />Processing…</span>
-            : 'Approve & List Token'}
+        <div style={{ marginBottom:16 }}><label className="label">Description (optional)</label><textarea className="input" rows={2} value={desc} onChange={e=>setDesc(e.target.value)} style={{ resize:'vertical' }} placeholder="Tell buyers about this token…" /></div>
+        <button className="btn btn-lime" style={{ width:'100%', padding:'12px 0', fontSize:14 }} disabled={busy||!price||!amt} onClick={submit}>
+          {busy ? <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}><span className="spinner spinner-black"/>Processing…</span> : 'Approve & List Token'}
         </button>
       </div>
     </div>
   );
 }
 
-// ── Edit Listing Modal ────────────────────────────────────────────────────────
 function EditModal({ listing, onClose, onSuccess }: { listing: OTCListing; onClose: () => void; onSuccess: () => void }) {
+  const router = useRouter();
   const { data: wc } = useWalletClient();
   const info = useTokenInfo(listing.tokenAddress);
   const [price, setPrice] = useState(fmtETH(listing.priceForFull, 6));
   const [fill,  setFill]  = useState(listing.fillTerms);
-  const [any,   setAny]   = useState(listing.acceptsAnyToken);
+  // Detect current payMode from listing
+  const initPayMode = listing.acceptsAnyToken ? 2 : listing.acceptedTokens && listing.acceptedTokens.length > 0 ? 1 : 0;
+  const [payMode, setPayMode] = useState(initPayMode);
   const [desc,  setDesc]  = useState(listing.description);
   const [busy,  setBusy]  = useState(false);
+
+  const PAY_MODES = [
+    { v:0, icon:'⟠', l:'ETH Only',   d:'Buyers must pay with ETH' },
+    { v:1, icon:'💵', l:'USDT Only',  d:'Buyers must pay with USDT' },
+    { v:2, icon:'💱', l:'ETH + USDT', d:'Buyer can choose ETH or USDT' },
+  ];
 
   async function submit() {
     if (!wc || !price) return;
     setBusy(true);
     try {
       const priceWei = parseEther(price);
+      const acceptsAny = payMode === 2;
+      const acceptedTokens: `0x${string}`[] = payMode === 1 ? [CONTRACTS.USDT] : [];
       toast.loading('Editing listing…');
-      const tx = await wc.writeContract({
-        address: CONTRACTS.OTC, abi: OTC_ABI, functionName: 'editListing',
-        args: [listing.id, priceWei, [], any, fill, desc],
-        value: FEES.EDIT,
-      });
-      await publicClient.waitForTransactionReceipt({ hash: tx as `0x${string}` });
-      toast.dismiss();
-      toast.success('Listing updated!');
-      onSuccess();
-    } catch (e: any) { toast.dismiss(); toast.error(e?.shortMessage ?? 'Failed'); }
+      const tx = await wc.writeContract({ address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'editListing', args:[listing.id, priceWei, acceptedTokens, acceptsAny, fill, desc], value:FEES.EDIT });
+      await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
+      toast.dismiss(); toast.success('Listing updated!'); onSuccess();
+    } catch(e:any){ toast.dismiss(); toast.error(e?.shortMessage??'Failed'); }
     setBusy(false);
   }
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">Edit Listing #{listing.id.toString()}</div>
         <div className="modal-sub">Edit fee: 0.001 ETH · Cannot change token or amount</div>
-
-        <div style={{ padding: '9px 12px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 8, fontSize: 12, color: '#8888AA', marginBottom: 16 }}>
-          Token: <strong style={{ color: '#fff' }}>{info?.name ?? short(listing.tokenAddress)}</strong>
-          &nbsp;· Remaining: <strong style={{ color: '#C8F000' }}>{fmtToken(listing.remainingAmount, info?.decimals ?? 18)} {info?.symbol}</strong>
+        <div style={{ padding:'9px 12px', background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.07)', borderRadius:8, fontSize:12, color:'#8888AA', marginBottom:16 }}>
+          Token: <strong style={{ color:'#fff' }}>{info?.name??short(listing.tokenAddress)}</strong>
+          &nbsp;· Remaining: <strong style={{ color:'#C8F000' }}>{fmtToken(listing.remainingAmount,info?.decimals??18)} {info?.symbol}</strong>
         </div>
-
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom:14 }}>
           <label className="label">New Price for 100% (ETH)</label>
-          <input className="input" type="number" value={price} onChange={e => setPrice(e.target.value)} />
+          <input className="input" type="number" value={price} onChange={e=>setPrice(e.target.value)} />
         </div>
-
-        {price && (
-          <div style={{ padding: '8px 12px', background: 'rgba(200,240,0,.06)', border: '1px solid rgba(200,240,0,.14)', borderRadius: 7, fontSize: 11, color: '#C8F000', marginBottom: 14 }}>
-            50% = {(parseFloat(price || '0') / 2).toFixed(5)} ETH · 100% = {price} ETH
-          </div>
-        )}
-
-        <div style={{ marginBottom: 14 }}>
+        {price && <div style={{ padding:'8px 12px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.14)', borderRadius:7, fontSize:11, color:'#C8F000', marginBottom:14 }}>50% = {(parseFloat(price||'0')/2).toFixed(5)} ETH · 100% = {price} ETH</div>}
+        <div style={{ marginBottom:14 }}>
           <label className="label">Fill Terms</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[{ v: 0, l: '50% or 100%' }, { v: 1, l: '100% only' }].map(o => (
-              <div key={o.v} onClick={() => setFill(o.v)} style={{ padding: '9px 12px', borderRadius: 7, cursor: 'pointer', textAlign: 'center', fontWeight: 700, fontSize: 12, border: `1px solid ${fill === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: fill === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
-                {o.l}
-              </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+            {[{v:0,l:'50% or 100%'},{v:1,l:'100% only'}].map(o=>(
+              <div key={o.v} onClick={()=>setFill(o.v)} style={{ padding:'9px 12px', borderRadius:7, cursor:'pointer', textAlign:'center', fontWeight:700, fontSize:12, border:`1px solid ${fill===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:fill===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>{o.l}</div>
             ))}
           </div>
         </div>
-
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom:14 }}>
           <label className="label">Accepted Payment</label>
-          {[{ v: false, l: 'ETH + USDT' }, { v: true, l: 'Any token' }].map(o => (
-            <div key={String(o.v)} onClick={() => setAny(o.v)} style={{ padding: '9px 12px', marginBottom: 7, borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 600, border: `1px solid ${any === o.v ? '#C8F000' : 'rgba(255,255,255,.1)'}`, background: any === o.v ? 'rgba(200,240,0,.07)' : '#1C1C35' }}>
-              {o.l}
+          {PAY_MODES.map(o=>(
+            <div key={o.v} onClick={()=>setPayMode(o.v)} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 12px', marginBottom:7, borderRadius:7, cursor:'pointer', border:`1px solid ${payMode===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:payMode===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
+              <span style={{ fontSize:14 }}>{o.icon}</span>
+              <div style={{ flex:1 }}><div style={{ fontSize:12, fontWeight:700 }}>{o.l}</div><div style={{ fontSize:10, color:'#8888AA' }}>{o.d}</div></div>
+              {payMode===o.v && <span style={{ color:'#C8F000' }}>✓</span>}
             </div>
           ))}
         </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <label className="label">Description</label>
-          <textarea className="input" rows={2} value={desc} onChange={e => setDesc(e.target.value)} style={{ resize: 'vertical' }} />
-        </div>
-
-        <button className="btn btn-lime" style={{ width: '100%', padding: '12px 0', fontSize: 14 }} disabled={busy || !price} onClick={submit}>
-          {busy
-            ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><span className="spinner spinner-black" />Updating…</span>
-            : 'Save Changes — 0.001 ETH'}
+        <div style={{ marginBottom:16 }}><label className="label">Description</label><textarea className="input" rows={2} value={desc} onChange={e=>setDesc(e.target.value)} style={{ resize:'vertical' }} /></div>
+        <button className="btn btn-lime" style={{ width:'100%', padding:'12px 0', fontSize:14 }} disabled={busy||!price} onClick={submit}>
+          {busy ? <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}><span className="spinner spinner-black"/>Updating…</span> : 'Save Changes — 0.001 ETH'}
         </button>
       </div>
     </div>
   );
 }
 
+
 // ── Main Portfolio Page ───────────────────────────────────────────────────────
 export default function PortfolioPage() {
   const { address, isConnected } = useAccount();
+  const router = useRouter();
   const { data: wc } = useWalletClient();
   const addr = address as `0x${string}` | undefined;
 
@@ -548,7 +538,7 @@ export default function PortfolioPage() {
                 <div key={l.id.toString()} style={{ padding: '14px 16px', background: '#0F0F1C', border: '1px solid rgba(255,255,255,.07)', borderRadius: 10, marginBottom: 10 }}>
                   {/* Clickable top section opens detail modal */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', marginBottom: 10 }}
-                    onClick={() => setViewListId(l.id)}>
+                    onClick={() => router.push(`/listing/${l.id.toString()}`)}>
                     <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(200,240,0,.08)', border: '1px solid rgba(200,240,0,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🪙</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 700 }}>
@@ -578,7 +568,7 @@ export default function PortfolioPage() {
                   {/* Action buttons */}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button className="btn btn-ghost" style={{ flex: 1, padding: '7px 0', fontSize: 12 }}
-                      onClick={() => setViewListId(l.id)}>
+                      onClick={() => router.push(`/listing/${l.id.toString()}`)}>
                       👁 View Offers
                     </button>
                     <button className="btn btn-ghost" style={{ flex: 1, padding: '7px 0', fontSize: 12 }}
