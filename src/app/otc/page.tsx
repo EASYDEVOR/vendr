@@ -255,38 +255,9 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
           )}
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
-          <div>
-            <label className="label">Amount to List *</label>
-            <input className="input" type="number" placeholder="e.g. 50000" value={amount} onChange={e=>setAmount(e.target.value)} />
-            {overBal && <div style={{ fontSize:10, color:'#FF4444', marginTop:4 }}>⚠️ Exceeds your balance</div>}
-          </div>
-          <div>
-            <label className="label">Price for 100% (ETH) *</label>
-            <input className="input" type="number" placeholder="e.g. 0.15" value={price} onChange={e=>setPrice(e.target.value)} />
-          </div>
-        </div>
-
-        {price && fill===0 && (
-          <div style={{ padding:'8px 12px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.15)', borderRadius:7, fontSize:11, color:'#C8F000', marginBottom:14 }}>
-            50% = {(parseFloat(price)/2).toFixed(5)} ETH · 100% = {price} ETH
-          </div>
-        )}
-
+        {/* ── STEP 1: Choose payment mode FIRST ── */}
         <div style={{ marginBottom:14 }}>
-          <label className="label">Fill Terms</label>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-            {[{v:0,l:'50% or 100%',d:'Buyers can fill half or all'},{v:1,l:'100% only',d:'Must buy everything'}].map(o=>(
-              <div key={o.v} onClick={()=>setFill(o.v)} style={{ padding:10, borderRadius:7, cursor:'pointer', border:`1px solid ${fill===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:fill===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
-                <div style={{ fontSize:12, fontWeight:700, marginBottom:2 }}>{o.l}</div>
-                <div style={{ fontSize:10, color:'#8888AA' }}>{o.d}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ marginBottom:14 }}>
-          <label className="label">Accepted Payment</label>
+          <label className="label">① Accepted Payment — choose first</label>
           {PAY_MODES.map(o=>(
             <div key={o.v} onClick={()=>setPayMode(o.v)} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 12px', marginBottom:7, borderRadius:7, cursor:'pointer', border:`1px solid ${payMode===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:payMode===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
               <span style={{ fontSize:14 }}>{o.icon}</span>
@@ -297,6 +268,47 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
               {payMode===o.v && <span style={{ color:'#C8F000', fontSize:14 }}>✓</span>}
             </div>
           ))}
+        </div>
+
+        {/* ── STEP 2: Amount + Price (label changes per payment mode) ── */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+          <div>
+            <label className="label">② Amount to List *</label>
+            <input className="input" type="number" placeholder="e.g. 50000" value={amount} onChange={e=>setAmount(e.target.value)} />
+            {overBal && <div style={{ fontSize:10, color:'#FF4444', marginTop:4 }}>⚠️ Exceeds your balance</div>}
+          </div>
+          <div>
+            <label className="label">
+              {payMode===1 ? '③ Price for 100% (USDT) *' : '③ Price for 100% (ETH) *'}
+            </label>
+            <div style={{ position:'relative' }}>
+              <input className="input" type="number"
+                placeholder={payMode===1 ? 'e.g. 2500' : 'e.g. 0.15'}
+                value={price} onChange={e=>setPrice(e.target.value)}
+                style={{ paddingRight:50 }} />
+              <span style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', fontSize:11, color:'#8888AA', fontFamily:'Space Mono,monospace', pointerEvents:'none' }}>
+                {payMode===1 ? 'USDT' : 'ETH'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {price && fill===0 && (
+          <div style={{ padding:'8px 12px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.15)', borderRadius:7, fontSize:11, color:'#C8F000', marginBottom:14 }}>
+            50% = {(parseFloat(price)/2).toFixed(payMode===1?2:5)} {payMode===1?'USDT':'ETH'} · 100% = {price} {payMode===1?'USDT':'ETH'}
+          </div>
+        )}
+
+        <div style={{ marginBottom:14 }}>
+          <label className="label">④ Fill Terms</label>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+            {[{v:0,l:'50% or 100%',d:'Buyers can fill half or all'},{v:1,l:'100% only',d:'Must buy everything'}].map(o=>(
+              <div key={o.v} onClick={()=>setFill(o.v)} style={{ padding:10, borderRadius:7, cursor:'pointer', border:`1px solid ${fill===o.v?'#C8F000':'rgba(255,255,255,.1)'}`, background:fill===o.v?'rgba(200,240,0,.07)':'#1C1C35' }}>
+                <div style={{ fontSize:12, fontWeight:700, marginBottom:2 }}>{o.l}</div>
+                <div style={{ fontSize:10, color:'#8888AA' }}>{o.d}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div style={{ marginBottom:16 }}>
