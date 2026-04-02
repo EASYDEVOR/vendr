@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRouter } from 'next/navigation';
 import { parseEther, parseUnits } from 'viem';
