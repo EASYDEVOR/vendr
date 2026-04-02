@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRouter } from 'next/navigation';
 import { parseEther, parseUnits } from 'viem';
@@ -11,7 +11,7 @@ import SuccessModal from '@/components/SuccessModal';
 import { publicClient } from '@/lib/client';
 import { useUserOTC, useOTCListing, OTCListing, OTCOffer } from '@/hooks/useOTC';
 import { useWalletTokens, useTokenInfo } from '@/hooks/useWallet';
-import { CONTRACTS, FEES } from '@/lib/constants';
+import { CONTRACTS, FEES, KNOWN_TOKENS } from '@/lib/constants';
 import { OTC_ABI, ERC20_ABI } from '@/abis';
 import { short, fmtETH, fmtToken, ago, fillLabel, addrLink, tokenColor } from '@/lib/utils';
 
