@@ -15,68 +15,54 @@ export default function ThemeToggle() {
     }
   }, []);
 
-  function applyDarkMode() {
-    const r = document.documentElement.style;
-    r.setProperty('--bg', '#08080F');
-    r.setProperty('--s1', '#0F0F1C');
-    r.setProperty('--s2', '#15152A');
-    r.setProperty('--s3', '#1C1C35');
-    r.setProperty('--text', '#ffffff');
-    r.setProperty('--text-muted', '#8888AA');
-
+  const applyDarkMode = () => {
+    document.documentElement.style.setProperty('--bg', '#08080F');
+    document.documentElement.style.setProperty('--text', '#ffffff');
     document.body.style.background = '#08080F';
     document.body.style.color = '#ffffff';
+    removeCustomStyle();
+  };
 
-    removeThemeStyle();
-  }
-
-  function applyLightMode() {
-    const r = document.documentElement.style;
-    r.setProperty('--bg', '#F8F9FC');
-    r.setProperty('--s1', '#FFFFFF');
-    r.setProperty('--s2', '#F1F3F9');
-    r.setProperty('--s3', '#E6E9F2');
-    r.setProperty('--text', '#0F172A');
-    r.setProperty('--text-muted', '#475569');
-
+  const applyLightMode = () => {
+    document.documentElement.style.setProperty('--bg', '#F8F9FC');
+    document.documentElement.style.setProperty('--text', '#0F172A');
     document.body.style.background = '#F8F9FC';
     document.body.style.color = '#0F172A';
 
-    removeThemeStyle();
+    removeCustomStyle();
 
-    const s = document.createElement('style');
-    s.id = 'vendr-theme-style';
-    s.textContent = `
-      /* Force white backgrounds everywhere */
-      body, html, main, div, section, article, header, nav, footer,
-      .card, .modal, .tbl, .sub-tab, .ticker-wrap, .empty, .navbar,
-      .portfolio-page, .otc-page, .listing-page {
+    const style = document.createElement('style');
+    style.id = 'vendr-light-mode';
+    style.textContent = `
+      /* Force clean white background + dark text everywhere */
+      body, html, main, div, section, .card, .modal, .tbl, nav, header, footer,
+      .portfolio-page, .otc-page, .listing-page, .empty, .ticker-wrap {
         background: #F8F9FC !important;
         color: #0F172A !important;
       }
 
-      /* Cards & Containers */
-      .card, .modal, [style*="background"], .bg-\\[\\#0F0F1C\\], .bg-\\[\\#08080F\\] {
+      /* Cards, modals, containers */
+      .card, .modal, [style*="background-color"], .bg-\\[\\#0F0F1C\\], .bg-\\[\\#08080F\\], .bg-\\[\\#15152A\\] {
         background: #FFFFFF !important;
-        border-color: rgba(0,0,0,0.08) !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+        border: 1px solid rgba(15,23,42,0.08) !important;
+        box-shadow: 0 2px 8px rgba(15,23,42,0.06) !important;
       }
 
       /* Text */
-      .muted, .text-muted, [style*="color: #8888AA"], [style*="color: #44445A"] {
+      .muted, .text-muted, [style*="color:#8888AA"], [style*="color:#44445A"], [style*="color:#ffffff"] {
         color: #475569 !important;
       }
 
       /* Tabs & Navigation */
-      .sub-tab, .nav-tab, nav button, .tab {
+      .sub-tab, .nav-tab, nav button {
         background: #FFFFFF !important;
         color: #475569 !important;
-        border-color: rgba(0,0,0,0.1) !important;
+        border: 1px solid rgba(15,23,42,0.1) !important;
       }
-      .sub-tab.active, .nav-tab.active {
-        background: rgba(132, 204, 22, 0.08) !important;
+      .sub-tab.active {
+        background: rgba(132,204,22,0.1) !important;
         color: #4D7C0F !important;
-        border-color: rgba(132, 204, 22, 0.25) !important;
+        border-color: rgba(132,204,22,0.3) !important;
       }
 
       /* Tables */
@@ -89,35 +75,40 @@ export default function ThemeToggle() {
         color: #0F172A !important;
       }
       .tbl tbody tr:hover {
-        background: rgba(132, 204, 22, 0.05) !important;
+        background: rgba(132,204,22,0.04) !important;
       }
 
       /* Buttons */
       .btn-ghost {
         background: transparent !important;
-        border: 1px solid rgba(0,0,0,0.15) !important;
+        border: 1px solid rgba(15,23,42,0.15) !important;
         color: #0F172A !important;
       }
       .btn-ghost:hover {
         border-color: #84CC16 !important;
         color: #4D7C0F !important;
       }
-      .btn-lime, .btn-danger {
+      .btn-lime {
+        background: #84CC16 !important;
+        color: #1F2A0F !important;
+      }
+      .btn-danger {
+        background: #EF4444 !important;
         color: white !important;
       }
 
-      /* Inputs & Modals */
+      /* Inputs */
       .input, textarea {
         background: #F8F9FC !important;
-        border: 1px solid rgba(0,0,0,0.12) !important;
+        border: 1px solid rgba(15,23,42,0.12) !important;
         color: #0F172A !important;
       }
       .input:focus {
         border-color: #84CC16 !important;
-        box-shadow: 0 0 0 3px rgba(132,204,22,0.15) !important;
+        box-shadow: 0 0 0 3px rgba(132,204,22,0.12) !important;
       }
 
-      /* Badges & Bars */
+      /* Badges & Progress */
       .badge-lime, .badge-green {
         background: rgba(132,204,22,0.12) !important;
         color: #4D7C0F !important;
@@ -129,35 +120,32 @@ export default function ThemeToggle() {
         background: #84CC16 !important;
       }
 
-      /* Other common dark leftovers */
-      [class*="dark"], .bg-\\[\\#0F0F1C\\], .bg-\\[\\#15152A\\], .text-white, .text-\\[\\#ffffff\\] {
+      /* Modal overlay */
+      .modal-bg {
+        background: rgba(15,23,42,0.55) !important;
+      }
+
+      /* Remove any remaining dark leftovers */
+      .bg-\\[\\#0F0F1C\\], .bg-\\[\\#08080F\\], .text-\\[\\#ffffff\\], .text-white {
         background: #FFFFFF !important;
         color: #0F172A !important;
       }
-
-      .modal-bg {
-        background: rgba(15, 23, 42, 0.5) !important;
-      }
     `;
-    document.head.appendChild(s);
-  }
+    document.head.appendChild(style);
+  };
 
-  function removeThemeStyle() {
-    const style = document.getElementById('vendr-theme-style');
-    if (style) style.remove();
-  }
+  const removeCustomStyle = () => {
+    const el = document.getElementById('vendr-light-mode');
+    if (el) el.remove();
+  };
 
-  function toggle() {
+  const toggle = () => {
     const nextDark = !isDark;
     setIsDark(nextDark);
     localStorage.setItem('vendr-theme', nextDark ? 'dark' : 'light');
-
-    if (nextDark) {
-      applyDarkMode();
-    } else {
-      applyLightMode();
-    }
-  }
+    if (nextDark) applyDarkMode();
+    else applyLightMode();
+  };
 
   return (
     <button
@@ -172,14 +160,13 @@ export default function ThemeToggle() {
         height: 44,
         borderRadius: '50%',
         background: isDark ? '#1C1C35' : '#FFFFFF',
-        border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'}`,
+        border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(15,23,42,0.15)'}`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: 20,
         cursor: 'pointer',
-        boxShadow: isDark ? '0 4px 14px rgba(0,0,0,0.5)' : '0 4px 14px rgba(0,0,0,0.12)',
-        transition: 'all 0.25s ease',
+        boxShadow: isDark ? '0 4px 14px rgba(0,0,0,0.5)' : '0 4px 14px rgba(15,23,42,0.12)',
       }}
     >
       {isDark ? '☀️' : '🌙'}
