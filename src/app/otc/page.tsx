@@ -120,7 +120,42 @@ function SettledRow({ l }: { l: OTCListing }) {
   );
 }
 
-// ── List Modal (FIXED) ───────────────────────────────────────────────────────────────
+// ── useTokenLookup Hook (added here) ───────────────────────────────
+function useTokenLookup(ca: string, userAddress?: string) {
+  const [info, setInfo] = useState<{ name:string; symbol:string; decimals:number; balance:bigint } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!ca || !ca.startsWith('0x') || ca.length !== 42) { 
+      setInfo(null); 
+      return; 
+    }
+    setLoading(true);
+    const addr = ca.toLowerCase();
+    const known = KNOWN_TOKENS[addr];
+    const calls: Promise<any>[] = known
+      ? [
+          Promise.resolve(known.name),
+          Promise.resolve(known.symbol),
+          publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' }),
+        ]
+      : [
+          publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'name' }),
+          publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'symbol' }),
+          publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' }),
+        ];
+    if (userAddress) calls.push(publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'balanceOf', args:[userAddress as `0x${string}`] }));
+
+    Promise.all(calls)
+      .then(([n,s,d,bal]) => setInfo({ name:n as string, symbol:s as string, decimals:Number(d), balance:(bal??BigInt(0)) as bigint }))
+      .catch(() => setInfo(null))
+      .finally(() => setLoading(false));
+  }, [ca, userAddress]);
+
+  return { info, loading };
+}
+
+// ── List Modal (FIXED - Price always in ETH) ─────────────────────────────────
 function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x${string}`)=>void }) {
   const { data:wc } = useWalletClient();
   const { address } = useAccount();
@@ -147,7 +182,7 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
     try {
       const addr = tokenCA as `0x${string}`;
       const tokenAmt = parseUnits(amount, tokenInfo.decimals);
-      const priceWei = parseEther(price);                    // Always stored as ETH
+      const priceWei = parseEther(price);                    // Always ETH
 
       const acceptsAny = payMode === 2;
       const acceptedTokens: `0x${string}`[] = payMode === 1 ? [CONTRACTS.USDT] : [];
@@ -246,7 +281,7 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
           ))}
         </div>
 
-        {/* Amount + Price */}
+        {/* Amount + Price (FIXED) */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
           <div>
             <label className="label">② Amount to List *</label>
