@@ -228,7 +228,7 @@ function useTokenLookup(ca: string, userAddress?: string) {
   return { info, loading };
 }
 
-// ── Quick List Modal (FIXED) ──────────────────────────────────────────────────────────
+// ── Quick List Modal (already fixed) ──────────────────────────────────────────────────────────
 function QuickListModal({ token, onClose, onSuccess }: { token: any; onClose: () => void; onSuccess: (h: `0x${string}`) => void }) {
   const { data: wc } = useWalletClient();
   const [price, setPrice] = useState('');
@@ -249,8 +249,7 @@ function QuickListModal({ token, onClose, onSuccess }: { token: any; onClose: ()
     setBusy(true);
     try {
       const tokenAmt = parseUnits(amt, token.decimals);
-      const priceWei = parseEther(price);                    // Always stored as ETH
-
+      const priceWei = parseEther(price);
       const acceptsAny = payMode === 2;
       const acceptedTokens: `0x${string}`[] = payMode === 1 ? [CONTRACTS.USDT] : [];
 
