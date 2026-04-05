@@ -120,39 +120,7 @@ function SettledRow({ l }: { l: OTCListing }) {
   );
 }
 
-// ── Shared token lookup hook (auto-lookups when CA changes) ────────────────────
-function useTokenLookup(ca: string, userAddress?: string) {
-  const [info, setInfo] = useState<{ name:string; symbol:string; decimals:number; balance:bigint } | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!ca || !ca.startsWith('0x') || ca.length !== 42) { setInfo(null); return; }
-    setLoading(true);
-    const addr = ca.toLowerCase();
-    const known = KNOWN_TOKENS[addr];
-    const calls: Promise<any>[] = known
-      ? [
-          Promise.resolve(known.name),
-          Promise.resolve(known.symbol),
-          publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' }),
-        ]
-      : [
-          publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'name' }),
-          publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'symbol' }),
-          publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'decimals' }),
-        ];
-    if (userAddress) calls.push(publicClient.readContract({ address:ca as `0x${string}`, abi:ERC20_ABI, functionName:'balanceOf', args:[userAddress as `0x${string}`] }));
-
-    Promise.all(calls)
-      .then(([n,s,d,bal]) => setInfo({ name:n as string, symbol:s as string, decimals:Number(d), balance:(bal??BigInt(0)) as bigint }))
-      .catch(() => setInfo(null))
-      .finally(() => setLoading(false));
-  }, [ca, userAddress]);
-
-  return { info, loading };
-}
-
-// ── List Modal ─────────────────────────────────────────────────────────────────
+// ── List Modal (FIXED) ───────────────────────────────────────────────────────────────
 function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x${string}`)=>void }) {
   const { data:wc } = useWalletClient();
   const { address } = useAccount();
@@ -168,8 +136,8 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
 
   const SUGGESTED = Object.entries(KNOWN_TOKENS).map(([addr,t])=>({ addr, ...t }));
   const PAY_MODES = [
-    { v:0, icon:'⟠', l:'ETH Only',   d:'Buyers must pay with ETH' },
-    { v:1, icon:'💵', l:'USDT Only',  d:'Buyers must pay with USDT' },
+    { v:0, icon:'⟠', l:'ETH Only', d:'Buyers must pay with ETH' },
+    { v:1, icon:'💵', l:'USDT Only', d:'Buyers must pay with USDT' },
     { v:2, icon:'💱', l:'ETH + USDT', d:'Buyer can choose ETH or USDT' },
   ];
 
@@ -179,7 +147,8 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
     try {
       const addr = tokenCA as `0x${string}`;
       const tokenAmt = parseUnits(amount, tokenInfo.decimals);
-      const priceWei = parseEther(price);
+      const priceWei = parseEther(price);                    // Always stored as ETH
+
       const acceptsAny = payMode === 2;
       const acceptedTokens: `0x${string}`[] = payMode === 1 ? [CONTRACTS.USDT] : [];
 
@@ -187,19 +156,26 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
       toast.loading('Step 1/2 — Approving token…');
       const ap = await wc.writeContract({ address:addr, abi:ERC20_ABI, functionName:'approve', args:[CONTRACTS.OTC, tokenAmt] });
       await publicClient.waitForTransactionReceipt({ hash:ap as `0x${string}` });
-      toast.dismiss(); toast.success('Approved!');
+      toast.dismiss(); 
+      toast.success('Approved!');
 
       setStep(2);
       toast.loading('Step 2/2 — Listing…');
       const tx = await wc.writeContract({
-        address:CONTRACTS.OTC, abi:OTC_ABI, functionName:'listToken',
+        address:CONTRACTS.OTC, 
+        abi:OTC_ABI, 
+        functionName:'listToken',
         args:[addr, tokenAmt, priceWei, acceptedTokens, acceptsAny, fill, desc],
         value:FEES.LIST,
       });
       await publicClient.waitForTransactionReceipt({ hash:tx as `0x${string}` });
       toast.dismiss();
       onSuccess(tx as `0x${string}`);
-    } catch(e:any){ toast.dismiss(); toast.error(e?.shortMessage??'Transaction failed'); setStep(0); }
+    } catch(e:any){ 
+      toast.dismiss(); 
+      toast.error(e?.shortMessage??'Transaction failed'); 
+      setStep(0); 
+    }
     setBusy(false);
   }
 
@@ -237,7 +213,7 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
           </div>
         </div>
 
-        {/* Token CA — auto-lookup on change */}
+        {/* Token CA */}
         <div style={{ marginBottom:14 }}>
           <label className="label">Token Contract Address *</label>
           <input className="input" placeholder="0x… (auto-looks up as you type)" value={tokenCA} onChange={e=>setTokenCA(e.target.value)} />
@@ -255,7 +231,7 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
           )}
         </div>
 
-        {/* ── STEP 1: Choose payment mode FIRST ── */}
+        {/* Payment Mode */}
         <div style={{ marginBottom:14 }}>
           <label className="label">① Accepted Payment — choose first</label>
           {PAY_MODES.map(o=>(
@@ -270,7 +246,7 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
           ))}
         </div>
 
-        {/* ── STEP 2: Amount + Price (label changes per payment mode) ── */}
+        {/* Amount + Price */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
           <div>
             <label className="label">② Amount to List *</label>
@@ -278,24 +254,27 @@ function ListModal({ onClose, onSuccess }: { onClose:()=>void; onSuccess:(h:`0x$
             {overBal && <div style={{ fontSize:10, color:'#FF4444', marginTop:4 }}>⚠️ Exceeds your balance</div>}
           </div>
           <div>
-            <label className="label">
-              {payMode===1 ? '③ Price for 100% (USDT) *' : '③ Price for 100% (ETH) *'}
-            </label>
+            <label className="label">③ Price for 100% (ETH) *</label>
             <div style={{ position:'relative' }}>
               <input className="input" type="number"
-                placeholder={payMode===1 ? 'e.g. 2500' : 'e.g. 0.15'}
+                placeholder="e.g. 0.15"
                 value={price} onChange={e=>setPrice(e.target.value)}
                 style={{ paddingRight:50 }} />
               <span style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', fontSize:11, color:'#8888AA', fontFamily:'Space Mono,monospace', pointerEvents:'none' }}>
-                {payMode===1 ? 'USDT' : 'ETH'}
+                ETH
               </span>
             </div>
+            {payMode === 1 && (
+              <div style={{ fontSize: 11, color: '#C8F000', marginTop: 6 }}>
+                Buyers will pay the equivalent amount in USDT at current rate
+              </div>
+            )}
           </div>
         </div>
 
-        {price && fill===0 && (
-          <div style={{ padding:'8px 12px', background:'rgba(200,240,0,.06)', border:'1px solid rgba(200,240,0,.15)', borderRadius:7, fontSize:11, color:'#C8F000', marginBottom:14 }}>
-            50% = {(parseFloat(price)/2).toFixed(payMode===1?2:5)} {payMode===1?'USDT':'ETH'} · 100% = {price} {payMode===1?'USDT':'ETH'}
+        {price && (
+          <div style={{ padding: '8px 12px', background: 'rgba(200,240,0,.06)', border: '1px solid rgba(200,240,0,.15)', borderRadius: 7, fontSize: 11, color: '#C8F000', marginBottom: 14 }}>
+            50% = {(parseFloat(price)/2).toFixed(5)} ETH · 100% = {price} ETH
           </div>
         )}
 
@@ -345,7 +324,6 @@ export default function OTCPage() {
     <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', background:'#08080F' }}>
       <Navbar />
       <LiveTicker />
-
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'9px 20px', borderBottom:'1px solid rgba(255,255,255,.07)', background:'#0F0F1C' }}>
         <div style={{ display:'flex', gap:4 }}>
           <button className={`sub-tab ${tab==='listed'?'active':''}`} onClick={()=>setTab('listed')}>
@@ -366,7 +344,6 @@ export default function OTCPage() {
           </button>
         </div>
       </div>
-
       <div style={{ padding:'0 20px 20px', flex:1 }}>
         {loading && (
           <div style={{ textAlign:'center', padding:64 }}>
@@ -425,7 +402,6 @@ export default function OTCPage() {
           )
         )}
       </div>
-
       <BottomBar />
       {showList && <ListModal onClose={()=>setShowList(false)} onSuccess={h=>{ setShowList(false); setSuccess({type:'listed',details:{txHash:h}}); refetch(); }} />}
       {success && <SuccessModal type={success.type} details={success.details} onClose={()=>setSuccess(null)} />}
