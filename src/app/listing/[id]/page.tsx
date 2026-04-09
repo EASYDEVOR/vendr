@@ -73,6 +73,79 @@ function useETHPrice() {
   return price;
 }
 
+
+// ── OfferRow — resolves token name/symbol/scan link for any offered token ─────
+function OfferRow({ o, isSeller, busy, onAccept }: {
+  o: OTCOffer;
+  isSeller: boolean;
+  busy: boolean;
+  onAccept: (id: bigint) => void;
+}) {
+  const ZERO = '0x0000000000000000000000000000000000000000';
+  const isETH = o.offerToken === ZERO;
+  const tokenInfo = useTokenInfo(isETH ? null : o.offerToken as `0x${string}`);
+
+  // Resolve display name and amount
+  const tokenName    = isETH ? 'ETH' : (tokenInfo?.symbol ?? o.offerToken.slice(0,8)+'…');
+  const tokenFull    = isETH ? 'Ethereum (ETH)' : (tokenInfo ? `${tokenInfo.name} (${tokenInfo.symbol})` : o.offerToken);
+  const decimals     = isETH ? 18 : (tokenInfo?.decimals ?? 18);
+  const amountStr    = isETH
+    ? `${fmtETH(o.offerAmount)} ETH`
+    : `${fmtToken(o.offerAmount, decimals)} ${tokenName}`;
+  const isVerified   = !isETH && !!KNOWN_TOKENS[o.offerToken.toLowerCase()]?.verified;
+
+  return (
+    <div style={{ padding:'13px 18px', borderBottom:'1px solid rgba(255,255,255,.03)', display:'flex', alignItems:'center', gap:12 }}>
+      {/* Maker avatar */}
+      <div style={{ width:32, height:32, borderRadius:'50%', background:'#1C1C35', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, fontFamily:'Space Mono,monospace', flexShrink:0, color:'#8888AA' }}>
+        {o.offerMaker.slice(2,4).toUpperCase()}
+      </div>
+
+      {/* Maker + fill info */}
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>
+          <span style={{ fontFamily:'Space Mono,monospace', fontSize:11, color:'#8888AA' }}>{short(o.offerMaker)}</span>
+          <a href={addrLink(o.offerMaker)} target="_blank" rel="noopener noreferrer" className="scan-btn" style={{ fontSize:9 }}>🔍</a>
+          <span className={`badge ${o.forHalf ? 'badge-gold' : 'badge-lime'}`} style={{ fontSize:9 }}>
+            {o.forHalf ? '50% fill' : '100% fill'}
+          </span>
+        </div>
+        <div style={{ fontSize:10, color:'#44445A' }}>
+          {ago(o.createdAt)}{o.message ? ` · "${o.message}"` : ''}
+        </div>
+      </div>
+
+      {/* Token offered — the key part: show full name + amount + scan */}
+      <div style={{ textAlign:'right', marginRight: isSeller ? 12 : 0 }}>
+        {/* Amount in big */}
+        <div style={{ fontFamily:'Space Mono,monospace', fontSize:14, fontWeight:700, color:'#C8F000' }}>
+          {amountStr}
+        </div>
+        {/* Token identity row */}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:5, marginTop:3 }}>
+          {isETH ? (
+            <span style={{ fontSize:10, color:'#8888AA' }}>⟠ Ethereum (ETH)</span>
+          ) : (
+            <>
+              <span style={{ fontSize:10, color:'#8888AA' }}>{tokenFull}</span>
+              {isVerified && <span title="Verified token" style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:12, height:12, borderRadius:'50%', background:'#1DA1F2', color:'#fff', fontSize:7, fontWeight:900 }}>✓</span>}
+              <a href={addrLink(o.offerToken)} target="_blank" rel="noopener noreferrer" className="scan-btn" style={{ fontSize:9 }}>🔍</a>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Accept button — seller only */}
+      {isSeller && (
+        <button disabled={busy} onClick={() => onAccept(o.id)}
+          style={{ padding:'6px 16px', background:'#00C805', border:'none', borderRadius:6, color:'#000', fontSize:12, fontWeight:700, cursor:'pointer', opacity:busy?0.5:1, flexShrink:0 }}>
+          Accept
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function ListingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const listingId = BigInt(id);
@@ -350,24 +423,7 @@ export default function ListingPage({ params }: { params: Promise<{ id: string }
               {offers.length === 0 ? (
                 <div style={{ padding:'28px 18px', textAlign:'center', fontSize:13, color:'#44445A' }}>No offers yet — be the first.</div>
               ) : offers.map((o:OTCOffer)=>(
-                <div key={o.id.toString()} style={{ padding:'13px 18px', borderBottom:'1px solid rgba(255,255,255,.03)', display:'flex', alignItems:'center', gap:12 }}>
-                  <div style={{ width:32, height:32, borderRadius:'50%', background:'#1C1C35', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, fontFamily:'Space Mono,monospace', flexShrink:0 }}>{o.offerMaker.slice(2,4).toUpperCase()}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:'Space Mono,monospace', fontSize:11, color:'#8888AA' }}>{short(o.offerMaker)}</div>
-                    <div style={{ fontSize:10, color:'#44445A', marginTop:1 }}>
-                      {o.forHalf?'50%':'100%'} · {o.offerToken===ZERO?'ETH':'Token'} · {ago(o.createdAt)}{o.message?` · "${o.message}"` : ''}
-                    </div>
-                  </div>
-                  <div style={{ fontFamily:'Space Mono,monospace', fontSize:14, fontWeight:700, color:'#C8F000', marginRight:isSeller?12:0 }}>
-                    {o.offerToken===ZERO ? `${fmtETH(o.offerAmount)} ETH` : fmtToken(o.offerAmount,6)}
-                  </div>
-                  {isSeller && (
-                    <button disabled={busy} onClick={()=>doAccept(o.id)}
-                      style={{ padding:'6px 16px', background:'#00C805', border:'none', borderRadius:6, color:'#000', fontSize:12, fontWeight:700, cursor:'pointer', opacity:busy?0.5:1 }}>
-                      Accept
-                    </button>
-                  )}
-                </div>
+                <OfferRow key={o.id.toString()} o={o} isSeller={isSeller} busy={busy} onAccept={doAccept} />
               ))}
             </div>
           </div>
